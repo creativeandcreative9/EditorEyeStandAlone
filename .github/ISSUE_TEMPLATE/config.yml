@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion / 質問・相談 (Discord)
+    url: https://discord.gg/3wBYKyHg8
+    about: Please ask usage questions on Discord. Issues are for bug reports only.
+  - name: Get EES on the Unity Asset Store
+    url: https://assetstore.unity.com/packages/tools/ai-ml-integration/supercharge-your-development-workflow-editor-eye-standalone-381732
+    about: EES is distributed only through the Unity Asset Store.
