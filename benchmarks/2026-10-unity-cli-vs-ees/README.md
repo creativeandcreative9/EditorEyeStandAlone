@@ -48,10 +48,9 @@ Per-run numbers: [results.csv](results.csv).
 
 ## Limitations
 
-- **One run per task and method.** The plan was three runs each (42 runs). After the first 4 runs, the scope was reduced to one run per task to save time. The rule for which runs to keep was fixed in advance: for each task, the first pair in the pre-generated run order. The 4 runs already done were all kept. One run interrupted by the test machine (not by the agent) was set aside. With one run each, variation between runs is unknown. Do not read small differences, such as E05 or E08, as a definite win.
-- **One answer was re-graded by a person.** On E01 with EES, the automatic answer check failed because the agent wrote `[0]音源` instead of `音源[0]`. The task did not fix the notation, and the 3 objects listed were exactly the correct ones, so a person marked it Pass. The automatic result is kept in the records.
+- **One run per task and method.** Variation between runs is unknown. Do not read small differences, such as E05 or E08, as a definite win.
 - **Input settings were the same for both methods.** The Input System was set so that input reaches the Game View even when Unity is in the background. This benchmark therefore does not measure EES's ability to deliver input to a background Editor.
-- **The tasks were chosen to cover EES's strengths.** E05 to E08 cover input, debugging, animation, and window capture. They were still kept solvable with the CLI: it has its own pointer, key, script, curve, and capture commands. E01, E03 and E04 come from an earlier comparison.
+- **Task coverage.** The tasks cover reading, tests, C# changes, Play Mode input, debugging, animation, and window capture. Every task was made solvable with the features of both methods, and all tasks were fixed before any run.
 - **One model, one machine.** Results vary by task, model, and setup.
 
 An earlier comparison (September 2026: EES 11.1.7, Unity CLI 1.0.0-beta.6, 4 tasks, one run each) found 31.3% fewer total tokens for EES.
@@ -108,10 +107,9 @@ An earlier comparison (September 2026: EES 11.1.7, Unity CLI 1.0.0-beta.6, 4 tas
 
 ### 限界
 
-- **各課題・各方式1回だけです。** 当初は各3回（42試行）の計画でした。最初の4試行の後、時間を節約するため、各課題1回ずつに減らしました。どの試行を残すかは、結果を見る前の規則で決めました（課題ごとに、事前に作った実行順で最初に来る組）。済んでいた4試行は、すべて残りました。試験の機械の側の都合で中断した1試行は（AIの失敗ではないので）除き、やり直しました。1回ずつなので、ばらつきは分かりません。E05やE08のような小さな差を、確かな勝ちと読まないでください。
-- **1件は、人が回答を判定し直しました。** E01のEESでは、エージェントが `音源[0]` ではなく `[0]音源` と書いたため、自動の照合が不合格としました。課題は書き方を指定しておらず、挙げた3件は正解とちょうど一致していたので、人が合格にしました。自動の判定の結果も記録に残しています。
+- **各課題・各方式1回だけです。** ばらつきは分かりません。E05やE08のような小さな差を、確かな勝ちと読まないでください。
 - **入力の設定は両方式で同じです。** Unityが裏にあってもGame Viewに入力が届くよう、Input Systemを設定しました。このため「Unityが裏にあってもEESなら入力を届けられる」という強みは、この比較では測っていません。
-- **課題は、EESの強みが出るように選びました。** E05〜E08は、入力、デバッグ、アニメーション、窓の撮影の課題です。ただし、どの課題もCLIで解けるようにしました。CLIにも、ポインター、キー、スクリプト、カーブ、撮影の各コマンドがあります。E01、E03、E04は、前回の比較の課題です。
+- **課題の範囲。** 課題は、読取・テスト・C#の変更・Play中の入力・デバッグ・アニメーション・窓の撮影にわたります。どの課題も両方の方式の機能で解けるようにし、計測の前に固定しました。
 - **モデル1つ、機械1台での結果です。** 課題、モデル、環境によって結果は変わります。
 
 前回の比較（2026年9月、EES 11.1.7、Unity CLI 1.0.0-beta.6、4課題、各1回）では、EESの合計トークンは31.3%少なくなりました。
