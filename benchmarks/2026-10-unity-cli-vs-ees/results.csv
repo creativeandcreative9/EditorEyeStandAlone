@@ -1,15 +1,15 @@
 task,description,method,result,total_tokens,uncached_input_tokens,cached_input_tokens,output_tokens,elapsed_seconds,shell_commands
-E01,List matching GameObjects (read only),Unity CLI,Pass,372552,38800,330112,3640,81.7,10
-E01,List matching GameObjects (read only),EES,Pass,146515,18843,122112,5560,85.8,5
-E03,Run an EditMode test and report,Unity CLI,Pass,279656,36335,241920,1401,43.8,8
-E03,Run an EditMode test and report,EES,Pass,419399,27227,384896,7276,132.4,10
-E04,"Add a C# component, set 42, save, verify",Unity CLI,Pass,1691706,56351,1629696,5659,242.8,42
-E04,"Add a C# component, set 42, save, verify",EES,Pass,574071,30878,533632,9561,221.8,15
-E05,"Play Mode mouse drag, report distance",Unity CLI,Pass,783418,36514,743296,3608,114.1,25
-E05,"Play Mode mouse drag, report distance",EES,Pass,550900,34300,510336,6264,137.4,15
-E06,Reproduce and fix a counter bug in Play Mode,Unity CLI,Pass,2460334,78982,2371200,10152,322.3,103
-E06,Reproduce and fix a counter bug in Play Mode,EES,Pass,930225,41652,880384,8189,193.5,23
-E07,BlendShape value as a keyframe in a new clip,Unity CLI,Pass,718427,40043,674048,4336,107.4,20
-E07,BlendShape value as a keyframe in a new clip,EES,Pass,298056,29600,262912,5544,110.2,10
-E08,Capture the Inspector window as PNG,Unity CLI,Pass,529282,42469,483200,3613,96.1,20
-E08,Capture the Inspector window as PNG,EES,Pass,312225,30377,275200,6648,128.0,9
+1,List matching GameObjects (read only),Unity CLI,Pass,372552,38800,330112,3640,81.7,10
+1,List matching GameObjects (read only),EES,Pass,146515,18843,122112,5560,85.8,5
+2,Run an EditMode test and report,Unity CLI,Pass,279656,36335,241920,1401,43.8,8
+2,Run an EditMode test and report,EES,Pass,419399,27227,384896,7276,132.4,10
+3,"Add a C# component, set 42, save, verify",Unity CLI,Pass,1691706,56351,1629696,5659,242.8,42
+3,"Add a C# component, set 42, save, verify",EES,Pass,574071,30878,533632,9561,221.8,15
+4,"Play Mode mouse drag, report distance",Unity CLI,Pass,783418,36514,743296,3608,114.1,25
+4,"Play Mode mouse drag, report distance",EES,Pass,550900,34300,510336,6264,137.4,15
+5,Reproduce and fix a counter bug in Play Mode,Unity CLI,Pass,2460334,78982,2371200,10152,322.3,103
+5,Reproduce and fix a counter bug in Play Mode,EES,Pass,930225,41652,880384,8189,193.5,23
+6,BlendShape value as a keyframe in a new clip,Unity CLI,Pass,718427,40043,674048,4336,107.4,20
+6,BlendShape value as a keyframe in a new clip,EES,Pass,298056,29600,262912,5544,110.2,10
+7,Capture the Inspector window as PNG,Unity CLI,Pass,529282,42469,483200,3613,96.1,20
+7,Capture the Inspector window as PNG,EES,Pass,312225,30377,275200,6648,128.0,9
