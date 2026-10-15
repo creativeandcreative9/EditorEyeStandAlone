@@ -11,7 +11,7 @@ This repository is the project's public home: information, bug reports, and a wa
 
 ## Why EES
 
-- **Built to keep token use low.** The agent reads only the help it needs. Each request returns the result and its diagnostics in one compact response. Large outputs are saved to a file instead of flooding the conversation. In our comparison with Unity's official CLI on four practical tasks, both completed all four, and EES used **31.3% fewer total tokens** (922,126 vs 1,342,245; time was about 10% longer).*
+- **Built to keep token use low.** The agent reads only the help it needs. Each request returns the result and its diagnostics in one compact response. Large outputs are saved to a file instead of flooding the conversation. In our latest comparison with Unity's official CLI on seven practical tasks, both completed all seven, and EES used **52.7% fewer total tokens** (3,231,391 vs 6,835,375; total time was about the same). EES used more on one task, running a test. See the [benchmark](benchmarks/2026-10-unity-cli-vs-ees/README.md) for all results and limitations.*
 - **A transparent bridge.** EES runs inside the Unity Editor. There is no server, port, or helper process to install or keep running. Every request and response is a plain JSON file you can open and read.
 - **Animation editing.** Apply Humanoid poses and save them as AnimationClips, register clips on an AnimatorController, and record BlendShape values as keyframes.
 - **Screen capture and input simulation.** Capture the Game View, Scene View, or any Editor window, and drive Play Mode with mouse and keyboard input, including drags.
@@ -19,7 +19,7 @@ This repository is the project's public home: information, bug reports, and a wa
 - **Smarter C# changes.** New or edited scripts are compiled against your project before anything in Assets changes. Errors come back with their diagnostics and Assets stay untouched. If Unity's own compile still fails, the change is rolled back. Requests survive compilation and Domain Reload.
 - **Works while Unity is in the background** for most operations.
 
-\* Measured in September 2026 with EES 11.1.7 and Unity CLI 1.0.0-beta.6 on Unity 6000.3.7f1, using the same AI model (gpt-5.6-sol, medium) for both, one run per task. Results vary by task and model.
+\* Measured in October 2026 with EES 12.2.9 (via the optional ees-call client) and Unity CLI 1.0.0-beta.13 on Unity 6000.3.7f1, using the same AI agent and model (Codex CLI, gpt-5.6-sol, medium) for both, one run per task. Results vary by task and model.
 
 ## How it works
 
@@ -66,7 +66,7 @@ https://assetstore.unity.com/packages/tools/ai-ml-integration/supercharge-your-d
 
 ### EESを使う利点
 
-- **少ないトークンで済むように作っています。** エージェントは必要な説明だけを読みます。依頼ごとに、結果と診断を1つの簡潔な応答で返します。大きな出力は、会話に流さずファイルに保存します。Unity公式CLIと実作業4課題で比べたところ、どちらも4課題すべてを完了し、EESの合計トークンは **31.3%少なく** なりました（922,126対1,342,245。所要時間はEESが約10%長い）。※
+- **少ないトークンで済むように作っています。** エージェントは必要な説明だけを読みます。依頼ごとに、結果と診断を1つの簡潔な応答で返します。大きな出力は、会話に流さずファイルに保存します。Unity公式CLIと実作業7課題で比べたところ、どちらも7課題すべてを完了し、EESの合計トークンは **52.7%少なく** なりました（3,231,391対6,835,375。合計時間はほぼ同じ）。テストを実行する1課題では、EESのほうが多くなりました。全結果と限界は[ベンチマーク](benchmarks/2026-10-unity-cli-vs-ees/README.md#日本語)にあります。※
 - **透明な橋渡し役。** EESはUnityエディタの中で動きます。導入や常駐が必要なサーバー・ポート・補助プロセスはありません。依頼と応答はすべて普通のJSONファイルで、開いて中身を読めます。
 - **アニメーションの編集。** Humanoidのポーズを当ててAnimationClipとして保存し、AnimatorControllerに登録できます。BlendShapeの値をキーフレームとして記録することもできます。
 - **画面のキャプチャと入力のシミュレーション。** Game View・Scene View・任意のエディタの窓を撮影し、マウスとキーボードの入力（ドラッグを含む）でPlay Modeを操作できます。
@@ -74,7 +74,7 @@ https://assetstore.unity.com/packages/tools/ai-ml-integration/supercharge-your-d
 - **C#の変更をよりスマートに。** 新しいスクリプトや変更したスクリプトは、Assetsを変える前にプロジェクトに対してコンパイルして確かめます。エラーは診断つきで返り、Assetsは変わりません。Unity本体でのコンパイルに失敗した場合は、変更を元に戻します。コンパイルやDomain Reloadの間も、依頼は失われません。
 - **Unityが裏にあっても、** ほとんどの操作が動きます。
 
-※ 2026年9月に、EES 11.1.7とUnity CLI 1.0.0-beta.6をUnity 6000.3.7f1で、両方とも同じAIのモデル（gpt-5.6-sol、medium）を使い、各課題1回ずつ測った結果です。課題やモデルによって結果は変わります。
+※ 2026年10月に、EES 12.2.9（任意のクライアントees-call経由）とUnity CLI 1.0.0-beta.13をUnity 6000.3.7f1で、両方とも同じAIエージェントとモデル（Codex CLI、gpt-5.6-sol、medium）を使い、各課題1回ずつ測った結果です。課題やモデルによって結果は変わります。
 
 ### 動作環境
 
