@@ -1,0 +1,8 @@
+ees-call/bin/
+ees-call/obj/
+ees-call/publish/
+ees-call/ContractTests/bin/
+ees-call/ContractTests/obj/
+ees-call/ContractTests/contract-evidence/
+ees-call/__pycache__/
+ees-call/*.json.evidence

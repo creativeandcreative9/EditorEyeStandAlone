@@ -30,6 +30,8 @@ This repository is the project's public home: information, bug reports, and a wa
 
 EES is **not an MCP server**. Any AI agent that can read and write files in your project folder can use it, for example Claude Code or Codex CLI. After import, EES writes `EditorEye/AGENTS.md`, which tells the agent how to use it.
 
+Optional: [ees-call](ees-call) is a small MIT-licensed command-line client that sends one request and prints the response in a single command. EES works without it.
+
 ## Requirements
 
 - Windows 10/11
@@ -38,7 +40,7 @@ EES is **not an MCP server**. Any AI agent that can read and write files in your
 
 ## License
 
-EES is distributed only through the Unity Asset Store, under the [Unity Asset Store End User License Agreement](https://unity.com/legal/as-terms). This repository contains no package code. See [LICENSE.md](LICENSE.md).
+EES is distributed only through the Unity Asset Store, under the [Unity Asset Store End User License Agreement](https://unity.com/legal/as-terms). This repository contains no EES package code. The optional `ees-call` client is MIT-licensed. See [LICENSE.md](LICENSE.md).
 
 ## Bug reports and questions
 
@@ -82,7 +84,9 @@ https://assetstore.unity.com/packages/tools/ai-ml-integration/supercharge-your-d
 
 ### ライセンス
 
-EESはUnity Asset Storeだけで、[Unity Asset Store End User License Agreement](https://unity.com/legal/as-terms) のもとで配布しています。このリポジトリにはパッケージのコードを含みません。[LICENSE.md](LICENSE.md) を参照してください。
+EESはUnity Asset Storeだけで、[Unity Asset Store End User License Agreement](https://unity.com/legal/as-terms) のもとで配布しています。このリポジトリにはEESのパッケージのコードを含みません。任意のクライアント `ees-call` はMITライセンスです。[LICENSE.md](LICENSE.md) を参照してください。
+
+任意：[ees-call](ees-call) は、依頼の送信と応答の表示をコマンド1つで行う、MITライセンスの小さなコマンドラインのクライアントです。EESは、これが無くても動きます。
 
 ### 不具合報告と質問
 
