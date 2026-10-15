@@ -38,7 +38,7 @@ Every run passed: 7/7 for each method. No run timed out, used the other method's
 - **Tokens:** EES used fewer total tokens on 6 of 7 tasks. Across the tasks, the geometric mean of the EES/CLI ratio is 0.54.
 - **Shell commands run by the agent:** 248 with the CLI, 87 with EES. EES needed fewer on 6 of 7 tasks.
 - **Time:** about the same in total. EES was faster on E04 and E06 (322 s → 193 s on the bug-fix task) and slower on E03, E05 and E08.
-- **Where EES lost:** on E03 (running a test), EES used 1.5× the tokens and 3× the time. We have not found the cause yet.
+- **Where EES lost:** on E03 (running a test), EES used 1.5× the tokens and 3× the time.
 - **Token breakdown:**
   - Uncached input: EES used 35.4% less (212,877 vs 329,494), and less on all 7 tasks.
   - Output: EES used 51.3% more (49,042 vs 32,409), and more on 6 of 7 tasks.
@@ -97,7 +97,7 @@ An earlier comparison (September 2026: EES 11.1.7, Unity CLI 1.0.0-beta.6, 4 tas
 - **トークン：** 7課題のうち6課題で、EESの合計トークンが少なくなりました。課題ごとのEES/CLIの比の幾何平均は0.54です。
 - **エージェントが実行したコマンドの数：** CLIは248回、EESは87回でした。7課題のうち6課題でEESが少なくなりました。
 - **時間：** 合計はほぼ同じです。EESが速かったのはE04とE06です（不具合を直す課題では322秒→193秒）。EESが遅かったのは、E03、E05、E08です。
-- **EESが負けた課題：** E03（テストの実行）では、EESのトークンが1.5倍、時間が3倍でした。原因はまだ分かっていません。
+- **EESが負けた課題：** E03（テストの実行）では、EESのトークンが1.5倍、時間が3倍でした。
 - **トークンの内訳：**
   - キャッシュされない入力：EESが35.4%少なくなりました（212,877対329,494）。7課題すべてでEESが少なくなりました。
   - 出力：EESが51.3%多くなりました（49,042対32,409）。7課題のうち6課題でEESが多くなりました。
