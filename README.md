@@ -73,9 +73,17 @@ EES is distributed only through the Unity Asset Store, under the [Unity Asset St
 - **Bugs:** open an [Issue](../../issues) using the bug report template. Replies are on a best-effort basis.
 - **Questions and discussion:** [Editor Eye Discord community](https://discord.gg/3wBYKyHg8)
 
-## Support the project
+## Help keep EES free
 
-EES is free. If it saves you time, you can support its development with the **Sponsor** button at the top of this page. Thank you!
+EES is free. In the [benchmark](#benchmark-unity-official-cli-vs-ees) above, it cut total tokens roughly in half on the same tasks. If EES saves you on AI costs, consider putting a small part of that toward its development.
+
+Your support pays for:
+
+- Testing on new Unity versions
+- Re-running benchmarks (each run costs real AI usage)
+- Bug fixes and new features
+
+Use the **Sponsor** button at the top of this page. Even the price of a coffee helps. Thank you!
 
 ---
 
@@ -145,6 +153,14 @@ EESはUnity Asset Storeだけで、[Unity Asset Store End User License Agreement
 - **不具合：** 不具合報告のテンプレートで [Issue](../../issues) を作ってください。返答は不定期です。
 - **質問・相談：** [Editor Eye Discord コミュニティ](https://discord.gg/3wBYKyHg8)
 
-### 開発の支援
+### EESを無料のまま続けるために
 
-EESは無料です。役に立ったと感じたら、このページ上部の **Sponsor** ボタンから開発を支援していただけるとうれしいです。
+EESは無料です。上の[ベンチマーク](#ベンチマークunity公式cliとeesの比較)では、同じ作業で使ったトークンが約半分になりました。EESで浮いたAIの利用料の一部を、開発に回していただけると助かります。
+
+ご支援は、次のことに使います。
+
+- 新しいUnityのバージョンでの動作確認
+- ベンチマークの測り直し（測るたびに、AIの利用料がかかります）
+- 不具合の修正と、新しい機能の開発
+
+このページ上部の **Sponsor** ボタンから、コーヒー1杯分から支援できます。ありがとうございます！
