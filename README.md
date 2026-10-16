@@ -80,7 +80,6 @@ EES is free. In the [benchmark](#benchmark-unity-official-cli-vs-ees) above, it 
 Your support pays for:
 
 - Testing on new Unity versions
-- Re-running benchmarks (each run costs real AI usage)
 - Bug fixes and new features
 
 Use the **Sponsor** button at the top of this page. Even the price of a coffee helps. Thank you!
@@ -160,7 +159,6 @@ EESは無料です。上の[ベンチマーク](#ベンチマークunity公式cl
 ご支援は、次のことに使います。
 
 - 新しいUnityのバージョンでの動作確認
-- ベンチマークの測り直し（測るたびに、AIの利用料がかかります）
 - 不具合の修正と、新しい機能の開発
 
 このページ上部の **Sponsor** ボタンから、コーヒー1杯分から支援できます。ありがとうございます！
