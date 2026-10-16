@@ -77,11 +77,6 @@ EES is distributed only through the Unity Asset Store, under the [Unity Asset St
 
 EES is free. In the [benchmark](#benchmark-unity-official-cli-vs-ees) above, it cut total tokens roughly in half on the same tasks. If EES saves you on AI costs, consider putting a small part of that toward its development.
 
-Your support pays for:
-
-- Testing on new Unity versions
-- Bug fixes and new features
-
 Use the **Sponsor** button at the top of this page. Even the price of a coffee helps. Thank you!
 
 ---
@@ -155,10 +150,5 @@ EESはUnity Asset Storeだけで、[Unity Asset Store End User License Agreement
 ### EESを無料のまま続けるために
 
 EESは無料です。上の[ベンチマーク](#ベンチマークunity公式cliとeesの比較)では、同じ作業で使ったトークンが約半分になりました。EESで浮いたAIの利用料の一部を、開発に回していただけると助かります。
-
-ご支援は、次のことに使います。
-
-- 新しいUnityのバージョンでの動作確認
-- 不具合の修正と、新しい機能の開発
 
 このページ上部の **Sponsor** ボタンから、コーヒー1杯分から支援できます。ありがとうございます！
