@@ -47,7 +47,16 @@ Conditions, token breakdown, shell command counts, and limitations: [full benchm
 
 EES is **not an MCP server**. Any AI agent that can read and write files in your project folder can use it, for example Claude Code or Codex CLI. After import, EES writes `EditorEye/AGENTS.md`, which tells the agent how to use it.
 
-Optional: [ees-call](ees-call) is a small MIT-licensed command-line client that sends one request and prints the response in a single command. EES works without it.
+### ees-call (optional)
+
+[ees-call](ees-call) is a small command-line client. It gives the agent a single entry point for both input and output: one command writes the request to the inbox, waits for the matching response in the outbox, and prints it. EES works without it.
+
+- **One command per request.** The agent does not have to write the file, wait, and read the response as separate steps.
+- **Safe with non-English text.** `--output-file` saves the exact UTF-8 response to a file, avoiding text-encoding problems in PowerShell.
+- **Clear exit codes.** For example, a timeout means "outcome unknown, do not resend", so the agent does not repeat an operation by mistake.
+- **Easy to install.** One self-contained Windows x64 file, MIT license, downloadable from [Releases](../../releases). No .NET install needed.
+
+The benchmark above used EES through ees-call.
 
 ## Requirements
 
@@ -110,6 +119,17 @@ https://assetstore.unity.com/packages/tools/ai-ml-integration/supercharge-your-d
 
 条件、トークンの内訳、コマンドの数、限界は、[ベンチマークの詳細](benchmarks/2026-10-unity-cli-vs-ees/README.md#日本語)にあります。
 
+### ees-call（任意）
+
+[ees-call](ees-call) は、小さなコマンドラインのクライアントです。依頼（input）と応答（output）の単一窓口になります。コマンド1つで、依頼をinboxに書き、outboxに届いた対応する応答を待って、表示します。EESは、これが無くても動きます。
+
+- **依頼1つにコマンド1つ。** エージェントは、ファイルを書く・待つ・応答を読む、を別々の手順で行わずに済みます。
+- **日本語の応答も安全。** `--output-file` で、応答をUTF-8のまま正確にファイルへ保存します。PowerShellでの文字化けを避けられます。
+- **分かりやすい終了コード。** たとえば時間切れは「結果は不明。送り直さない」を意味します。エージェントが同じ操作を誤って繰り返すのを防ぎます。
+- **導入が簡単。** Windows x64用の1ファイル（.NETの導入は不要）、MITライセンスです。[Releases](../../releases) からダウンロードできます。
+
+上のベンチマークでは、ees-callを通してEESを使いました。
+
 ### 動作環境
 
 - Windows 10/11
@@ -119,8 +139,6 @@ https://assetstore.unity.com/packages/tools/ai-ml-integration/supercharge-your-d
 ### ライセンス
 
 EESはUnity Asset Storeだけで、[Unity Asset Store End User License Agreement](https://unity.com/legal/as-terms) のもとで配布しています。このリポジトリにはEESのパッケージのコードを含みません。任意のクライアント `ees-call` はMITライセンスです。[LICENSE.md](LICENSE.md) を参照してください。
-
-任意：[ees-call](ees-call) は、依頼の送信と応答の表示をコマンド1つで行う、MITライセンスの小さなコマンドラインのクライアントです。EESは、これが無くても動きます。
 
 ### 不具合報告と質問
 
