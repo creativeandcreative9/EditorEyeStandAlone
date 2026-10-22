@@ -2,7 +2,7 @@ task,description,method,result,total_tokens,uncached_input_tokens,cached_input_t
 1,List matching GameObjects (read only),Unity CLI,Pass,372552,38800,330112,3640,81.7,10
 1,List matching GameObjects (read only),EES,Pass,146515,18843,122112,5560,85.8,5
 2,Run an EditMode test and report,Unity CLI,Pass,279656,36335,241920,1401,43.8,8
-2,Run an EditMode test and report,EES,Pass,419399,27227,384896,7276,132.4,10
+2,Run an EditMode test and report,EES,Pass,167099,15790,149120,2189,73.3,6
 3,"Add a C# component, set 42, save, verify",Unity CLI,Pass,1691706,56351,1629696,5659,242.8,42
 3,"Add a C# component, set 42, save, verify",EES,Pass,574071,30878,533632,9561,221.8,15
 4,"Play Mode mouse drag, report distance",Unity CLI,Pass,783418,36514,743296,3608,114.1,25
