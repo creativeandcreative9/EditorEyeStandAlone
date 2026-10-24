@@ -17,8 +17,9 @@ The executable is not code-signed, so Windows SmartScreen may warn on first run.
 ## Usage
 
 ```
-ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--output-file <path>] [--wait-seconds <seconds>] [--fail-on-tool-error]
+ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--code-file <path>] [--text] [--output-file <path>] [--wait-seconds <seconds>] [--fail-on-tool-error]
 ees-call --wait-completion <path> --id <request-id> [--output-file <path>] [--wait-seconds <seconds>] [--fail-on-tool-error]
+ees-call --status --id <request-id>
 ees-call --help
 ```
 
@@ -26,12 +27,17 @@ ees-call --help
 $ees = '<Your Unity Project>/EditorEye/ees-call.exe'
 & $ees --tool help
 & $ees --tool get_logs --params-file ./params.json --output-file ./response.json
+& $ees --tool execute_dynamic_script --code-file ./scripts/InspectScene.cs --params-file ./script-options.json --text
 ```
 
 - `--params-file` takes a UTF-8 JSON file, or `-` for standard input. Default: `{}`.
-- `--output-file` saves the exact UTF-8 response to a new file. Use it from PowerShell to avoid text-encoding problems with non-ASCII responses.
+- `--code-file` sets `Params.CodePath` to an existing file's absolute path (with `/` separators). Use it only with `execute_dynamic_script` or `execute_dynamic_compilation`; other `--params-file` fields are retained, but that file must omit `Code` and `CodePath`.
+- `--text` prints a successful `result.result` string directly, or JSON for a non-string result. For failures it prints the error, available exception/source lines and user frames, and up to 10 compilation errors. Async acceptance stays full JSON. Output is UTF-8 without a BOM.
+- `--output-file` saves the exact full UTF-8 response to a new file. With `--text`, stdout contains the text summary while the file keeps the full response. Use it from PowerShell to avoid text-encoding problems with non-ASCII responses.
 - `--wait-seconds` is the response deadline. Default: 120.
-- An accepted (asynchronous) response is returned immediately and is not final success. Use `--wait-completion` with the reported completion file and request id for a separate, read-only wait.
+- `--status --id <request-id>` reports `completed`, `responded`, `queued`, or `unknown`, plus available `status.json` state and heartbeat, without sending anything. It checks outbox `archive/` too and returns one JSON line.
+- An accepted (asynchronous) response is returned immediately and is not final success. Use `--wait-completion` with the reported completion file and request id for a separate, read-only wait; if it has moved, the same filename is read from outbox `archive/`.
+- An async response with `completionFile` also prints the next `--wait-completion` command to stderr. It does not wait automatically.
 
 | Exit code | Meaning |
 |---|---|
@@ -72,4 +78,4 @@ The Python tests run against a temporary fake project and need no Unity. Python 
 
 実行ファイルにはコード署名がないため、初回の実行時にWindowsのSmartScreenが警告を出すことがあります。
 
-使い方、終了コード、ソースからのビルドは、上の英語の節を参照してください。
+使い方、終了コード、ソースからのビルドは、上の英語の節を参照してください。`--code-file` は `execute_dynamic_script` または `execute_dynamic_compilation` 用、`--text` は文字列結果や失敗診断の UTF-8 表示、`--status --id` は要求とUnityの状態を読むだけの確認です。非同期応答はそのまま返し、完了待ちの次のコマンドを stderr に表示します。

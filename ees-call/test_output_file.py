@@ -44,13 +44,13 @@ def main():
     def snapshot():
         return {p.name: p.read_bytes() for p in inbox.glob("*.json")}
 
-    def check(proc, code, output=None, raw=None):
+    def check(proc, code, output=None, raw=None, stdout_expected=b"", stderr_expected=b""):
         assert proc.returncode == code, (proc.returncode, code, proc.stderr)
-        assert proc.stdout == b"", proc.stdout
+        assert proc.stdout == stdout_expected, (proc.stdout, stdout_expected)
         if code in (2, 3, 4):
             assert isinstance(json.loads(proc.stderr), dict), proc.stderr
         else:
-            assert proc.stderr == b"", proc.stderr
+            assert proc.stderr == stderr_expected, (proc.stderr, stderr_expected)
         if output is not None:
             if raw is None:
                 assert not output.exists(), output
@@ -61,7 +61,7 @@ def main():
                     json.load(stream)
         assert not list(logs.glob(".ees-call-output-*.tmp"))
 
-    def tool(factory=payload, code=0, strict=False, race=False, respond=True):
+    def tool(factory=payload, code=0, strict=False, race=False, respond=True, text=False):
         nonlocal sequence
         sequence += 1
         output = logs / f"応答 {sequence} 😀.json"
@@ -109,6 +109,8 @@ def main():
         args = ["--tool", "fixture", "--params-file", str(params), "--output-file", output.name, "--wait-seconds", ".20" if not respond else "2"]
         if strict:
             args.append("--fail-on-tool-error")
+        if text:
+            args.append("--text")
         try:
             proc = invoke(args)
         finally:
@@ -134,7 +136,22 @@ def main():
                     valid_response = json.loads(raw)["id"] == request["Id"]
                 except (ValueError, KeyError, UnicodeError):
                     pass
-            check(proc, code, output, raw if valid_response else None)
+            stdout_expected = b""
+            stderr_expected = b""
+            if text and respond and code in (0, 5):
+                envelope = json.loads(raw)
+                if envelope.get("success") is True:
+                    stdout_expected = envelope["result"]["result"].encode("utf-8")
+            if respond and code in (0, 5):
+                envelope = json.loads(raw)
+                result = envelope.get("result") or {}
+                completion_file = result.get("completionFile")
+                if result.get("async") is True and isinstance(completion_file, str) and completion_file:
+                    completion_path = Path(completion_file)
+                    if not completion_path.is_absolute():
+                        completion_path = root / completion_path
+                    stderr_expected = f'next: ees-call --wait-completion "{completion_path.resolve()}" --id {request["Id"]}\n'.encode("utf-8")
+            check(proc, code, output, raw if valid_response else None, stdout_expected, stderr_expected)
             if code == 0 and not (json.loads(raw).get("result") or {}).get("async"):
                 assert json.loads(json.loads(output.read_text(encoding="utf-8"))["result"]["result"])["姿勢名"] == "三角座り"
 
@@ -175,10 +192,11 @@ def main():
 
     try:
         record("tool Unicode nested JSON; relative Japanese/emoji output; exact bytes", lambda: tool())
+        record("--text writes UTF-8 text to stdout and the full response to --output-file", lambda: tool(text=True))
         record("tool failure legacy preserves file", lambda: tool(lambda i: payload(i, False)))
         record("tool failure strict exit 5 preserves file", lambda: tool(lambda i: payload(i, False), 5, True))
         record("tool unclassified response preserves file and stderr", lambda: tool(lambda i: json.dumps(dict(id=i)).encode(), 4, True))
-        record("async acceptance saved without waiting for done", lambda: tool(lambda i: payload(i, result={"async": True, "completionFile": "later.done.json"})))
+        record("async acceptance saved without waiting for done", lambda: tool(lambda i: payload(i, result={"async": True, "completionFile": f"EditorEye/outbox/{i}.done.json"})))
         record("tool timeout leaves no completed file and no resend", lambda: tool(code=3, respond=False))
         record("tool malformed response leaves no completed file", lambda: tool(lambda i: b"{broken", 4))
         record("destination race preserves other owner's data and original response", lambda: tool(code=4, race=True))

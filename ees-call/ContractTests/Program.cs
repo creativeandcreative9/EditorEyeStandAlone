@@ -44,7 +44,8 @@ internal static class Program
             ("06-invalid-input-and-missing-transport", () => RunInvalidInputAsync(helperPath)),
             ("07-invalid-response-no-resend", () => RunInvalidResponseAsync(helperPath)),
             ("08-interruption-trace", () => RunInterruptionAsync(helperPath)),
-            ("09-json-types-unicode-file-and-stdin", () => RunJsonFidelityAsync(helperPath))
+            ("09-json-types-unicode-file-and-stdin", () => RunJsonFidelityAsync(helperPath)),
+            ("10-code-file-text-status-and-archive", () => RunNewFeaturesAsync(helperPath))
 
         };
 
@@ -261,6 +262,183 @@ internal static class Program
         return passed
             ? CaseResult.Pass("09-json-types-unicode-file-and-stdin", "UTF-8 path, file/stdin object, numeric lexeme, bool/null/array/nesting preserved")
             : CaseResult.Fail("09-json-types-unicode-file-and-stdin", $"file={fromFile.ExitCode}/{Text(fromFile.Stderr)}, stdin={fromStdin.ExitCode}/{Text(fromStdin.Stderr)}");
+    }
+
+    private static async Task<CaseResult> RunNewFeaturesAsync(string helperPath)
+    {
+        using Fixture codeFixture = Fixture.Create(helperPath, "code-file_日本語");
+        string codePath = Path.Combine(codeFixture.Root, "コード_日本語.cs");
+        string paramsPath = Path.Combine(codeFixture.Root, "params_日本語.json");
+        File.WriteAllBytes(codePath, new byte[] { 0xff, 0xfe });
+        File.WriteAllText(paramsPath, "{\"Mode\":\"snippet\",\"NoFallback\":true}", new UTF8Encoding(false));
+        ProcessResult codeFile = await RunWithResponderAsync(
+            codeFixture,
+            new[] { "--tool", "execute_dynamic_script", "--code-file", Path.GetFileName(codePath), "--params-file", paramsPath },
+            null,
+            async request =>
+            {
+                using JsonDocument document = JsonDocument.Parse(request.Raw);
+                JsonElement parameters = document.RootElement.GetProperty("Params");
+                string expectedPath = Path.GetFullPath(codePath).Replace('\\', '/');
+                if (parameters.GetProperty("CodePath").GetString() != expectedPath ||
+                    parameters.GetProperty("Mode").GetString() != "snippet" ||
+                    !parameters.GetProperty("NoFallback").GetBoolean() ||
+                    parameters.TryGetProperty("Code", out _))
+                    throw new InvalidOperationException("--code-file did not merge the absolute Japanese path with existing Params");
+                await WriteResponseAsync(codeFixture.Outbox, request.Id, $"{{\"id\":\"{request.Id}\",\"success\":true,\"result\":{{\"result\":\"完了\"}}}}");
+            });
+        bool codeRequestPassed = codeFile.ExitCode == 0;
+
+        ProcessResult wrongTool = await RunProcessAsync(codeFixture, new[] { "--tool", "help", "--code-file", codePath }, null);
+        string paramsWithCode = Path.Combine(codeFixture.Root, "params-code.json");
+        File.WriteAllText(paramsWithCode, "{\"Code\":\"class C {}\"}", new UTF8Encoding(false));
+        ProcessResult duplicateCode = await RunProcessAsync(codeFixture, new[] { "--tool", "execute_dynamic_script", "--code-file", codePath, "--params-file", paramsWithCode }, null);
+        string paramsWithCodePath = Path.Combine(codeFixture.Root, "params-code-path.json");
+        File.WriteAllText(paramsWithCodePath, "{\"CodePath\":\"old.cs\"}", new UTF8Encoding(false));
+        ProcessResult duplicateCodePath = await RunProcessAsync(codeFixture, new[] { "--tool", "execute_dynamic_script", "--code-file", codePath, "--params-file", paramsWithCodePath }, null);
+        ProcessResult missingCode = await RunProcessAsync(codeFixture, new[] { "--tool", "execute_dynamic_script", "--code-file", Path.Combine(codeFixture.Root, "missing.cs") }, null);
+        bool noRejectedCodeRequest = Directory.GetFiles(codeFixture.Inbox, "*.json").Length == 0;
+
+        using Fixture textFixture = Fixture.Create(helperPath, "text-日本語");
+        ProcessResult textString = await RunWithResponderAsync(textFixture, new[] { "--tool", "text", "--text" }, null,
+            request => WriteResponseAsync(textFixture.Outbox, request.Id, $"{{\"id\":\"{request.Id}\",\"success\":true,\"result\":{{\"result\":\"三角座り😀\"}}}}"));
+        bool textStringPassed = textString.ExitCode == 0 && textString.Stdout.SequenceEqual(StrictUtf8.GetBytes("三角座り😀")) && !textString.Stdout.Take(3).SequenceEqual(new byte[] { 0xef, 0xbb, 0xbf });
+
+        ProcessResult textObject = await RunWithResponderAsync(textFixture, new[] { "--tool", "text-object", "--text" }, null,
+            request => WriteResponseAsync(textFixture.Outbox, request.Id, $"{{\"id\":\"{request.Id}\",\"success\":true,\"result\":{{\"result\":{{\"value\":3}}}}}}"));
+        bool textObjectPassed = textObject.ExitCode == 0 && Text(textObject.Stdout) == "{\"value\":3}";
+
+        ProcessResult textWithoutNestedResult = await RunWithResponderAsync(textFixture, new[] { "--tool", "text-no-nested", "--text" }, null,
+            request => WriteResponseAsync(textFixture.Outbox, request.Id, $"{{\"id\":\"{request.Id}\",\"success\":true,\"result\":{{\"value\":4}}}}"));
+        bool textWithoutNestedPassed = textWithoutNestedResult.ExitCode == 0 && Text(textWithoutNestedResult.Stdout) == "{\"value\":4}";
+
+        ProcessResult textNull = await RunWithResponderAsync(textFixture, new[] { "--tool", "text-null", "--text" }, null,
+            request => WriteResponseAsync(textFixture.Outbox, request.Id, $"{{\"id\":\"{request.Id}\",\"success\":true,\"result\":{{\"result\":null}}}}"));
+        bool textNullPassed = textNull.ExitCode == 0 && Text(textNull.Stdout) == "null";
+
+        ProcessResult textFailure = await RunWithResponderAsync(textFixture, new[] { "--tool", "text-failure", "--text" }, null,
+            request => WriteResponseAsync(textFixture.Outbox, request.Id,
+                $"{{\"id\":\"{request.Id}\",\"success\":false,\"error\":\"実行に失敗\\n続き\",\"result\":{{\"exception\":{{\"type\":\"NullReferenceException\",\"sourceLine\":17,\"sourceSnippet\":\"target.value = null;\"}},\"userFrames\":[{{\"sourceLine\":17}},{{\"sourceLine\":9}}],\"compilationErrors\":[{{\"line\":4,\"column\":2,\"errorCode\":\"CS0103\",\"message\":\"name not found\"}}]}}}}"));
+        string failureText = Text(textFailure.Stdout);
+        bool textFailurePassed = textFailure.ExitCode == 0 && failureText.StartsWith("error: 実行に失敗 続き\n", StringComparison.Ordinal) &&
+            failureText.Contains("exception.type: NullReferenceException", StringComparison.Ordinal) &&
+            failureText.Contains("exception.sourceLine: 17", StringComparison.Ordinal) &&
+            failureText.Contains("exception.sourceSnippet: target.value = null;", StringComparison.Ordinal) &&
+            failureText.Contains("userFrames: 17,9", StringComparison.Ordinal) &&
+            failureText.Contains("L4:2 CS0103 name not found", StringComparison.Ordinal);
+
+        string compilationErrorList = string.Join(",", Enumerable.Range(1, 12).Select(line =>
+            $"{{\"line\":{line},\"column\":1,\"errorCode\":\"CS{line:0000}\",\"message\":\"error {line}\"}}"));
+        ProcessResult firstTenErrors = await RunWithResponderAsync(textFixture, new[] { "--tool", "text-many-errors", "--text" }, null,
+            request => WriteResponseAsync(textFixture.Outbox, request.Id,
+                $"{{\"id\":\"{request.Id}\",\"success\":false,\"error\":\"compile failed\",\"result\":{{\"compilationErrors\":[{compilationErrorList}]}}}}"));
+        string firstTenErrorText = Text(firstTenErrors.Stdout);
+        bool firstTenErrorsPassed = firstTenErrors.ExitCode == 0 && firstTenErrorText.Split('\n').Count(line => line.StartsWith("L", StringComparison.Ordinal)) == 10 &&
+            firstTenErrorText.Contains("L10:1 CS0010 error 10", StringComparison.Ordinal) && !firstTenErrorText.Contains("error 11", StringComparison.Ordinal);
+
+        ProcessResult textFailureWithoutLine = await RunWithResponderAsync(textFixture, new[] { "--tool", "text-failure-no-line", "--text" }, null,
+            request => WriteResponseAsync(textFixture.Outbox, request.Id,
+                $"{{\"id\":\"{request.Id}\",\"success\":false,\"error\":\"failed\",\"result\":{{\"exception\":{{\"type\":\"InvalidOperationException\",\"sourceLine\":null}}}}}}"));
+        string failureWithoutLineText = Text(textFailureWithoutLine.Stdout);
+        bool noLinePassed = textFailureWithoutLine.ExitCode == 0 && failureWithoutLineText.Contains("exception.type: InvalidOperationException", StringComparison.Ordinal) &&
+            !failureWithoutLineText.Contains("exception.sourceLine", StringComparison.Ordinal);
+
+        string asyncResponseTemplate = "{\"id\":\"__REQUEST_ID__\",\"success\":true,\"result\":{\"async\":true,\"completionFile\":\"EditorEye/outbox/__REQUEST_ID__.done.json\"}}";
+        string AsyncResponse(string id) => asyncResponseTemplate.Replace("__REQUEST_ID__", id, StringComparison.Ordinal);
+        string? asyncId = null;
+        ProcessResult asyncText = await RunWithResponderAsync(textFixture, new[] { "--tool", "async", "--text" }, null,
+            request =>
+            {
+                asyncId = request.Id;
+                return WriteResponseAsync(textFixture.Outbox, request.Id, AsyncResponse(request.Id));
+            });
+        string expectedAsync = asyncId is null ? string.Empty : AsyncResponse(asyncId);
+        string expectedNext = asyncId is null ? string.Empty : $"next: ees-call --wait-completion \"{Path.GetFullPath(Path.Combine(textFixture.Outbox, asyncId + ".done.json"))}\" --id {asyncId}\n";
+        bool asyncPassed = asyncId is not null && asyncText.ExitCode == 0 && Text(asyncText.Stdout) == expectedAsync && Text(asyncText.Stderr) == expectedNext;
+
+        using Fixture statusFixture = Fixture.Create(helperPath, "status-archive");
+        Directory.CreateDirectory(Path.Combine(statusFixture.Outbox, "archive"));
+        File.WriteAllText(Path.Combine(statusFixture.EditorEye, "status.json"),
+            "{\"state\":\"compiling\",\"pendingRequests\":0,\"heartbeatUtc\":\"" + DateTimeOffset.UtcNow.AddSeconds(-2).ToString("o", System.Globalization.CultureInfo.InvariantCulture) + "\"}", new UTF8Encoding(false));
+        string archivedId = "archived-response";
+        File.WriteAllText(Path.Combine(statusFixture.Outbox, "archive", archivedId + ".json"),
+            $"{{\"id\":\"{archivedId}\",\"success\":true,\"result\":{{\"status\":\"accepted\",\"async\":true,\"completionFile\":\"EditorEye/outbox/{archivedId}.done.json\"}}}}", new UTF8Encoding(false));
+        ProcessResult respondedStatus = await RunProcessAsync(statusFixture, new[] { "--status", "--id", archivedId }, null);
+        bool respondedPassed = StatusHas(respondedStatus, "responded", "async", true) && StatusHas(respondedStatus, "responded", "status", "accepted");
+
+        string archivedDoneId = "archived-done";
+        File.WriteAllText(Path.Combine(statusFixture.Outbox, "archive", archivedDoneId + ".done.json"),
+            $"{{\"id\":\"{archivedDoneId}\",\"success\":false,\"result\":{{\"outcome\":\"not_applied\"}}}}", new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(statusFixture.Outbox, archivedDoneId + ".json"),
+            $"{{\"id\":\"{archivedDoneId}\",\"success\":true,\"result\":{{\"status\":\"accepted\"}}}}", new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(statusFixture.Inbox, archivedDoneId + ".json"),
+            $"{{\"Id\":\"{archivedDoneId}\",\"Tool\":\"help\",\"Params\":{{}}}}", new UTF8Encoding(false));
+        ProcessResult completedStatus = await RunProcessAsync(statusFixture, new[] { "--status", "--id", archivedDoneId }, null);
+        bool completedPassed = StatusHas(completedStatus, "completed", "outcome", "not_applied") && StatusHas(completedStatus, "completed", "success", false);
+
+        string queuedId = "queued";
+        string queuedPath = Path.Combine(statusFixture.Inbox, queuedId + ".json");
+        File.WriteAllText(queuedPath, $"{{\"Id\":\"{queuedId}\",\"Tool\":\"help\",\"Params\":{{}}}}", new UTF8Encoding(false));
+        ProcessResult queuedStatus = await RunProcessAsync(statusFixture, new[] { "--status", "--id", queuedId }, null);
+        bool queuedPassed = StatusHas(queuedStatus, "queued", "unityState", "compiling") && File.Exists(queuedPath);
+        ProcessResult unknownStatus = await RunProcessAsync(statusFixture, new[] { "--status", "--id", "unknown" }, null);
+        bool unknownPassed = StatusHas(unknownStatus, "unknown", "unityState", "compiling");
+        ProcessResult invalidStatusId = await RunProcessAsync(statusFixture, new[] { "--status", "--id", "bad/name" }, null);
+        bool statusNoSend = Directory.GetFiles(statusFixture.Inbox, "*.json").Length == 2;
+        using JsonDocument statusDetails = JsonDocument.Parse(respondedStatus.Stdout);
+        bool heartbeatAgePassed = statusDetails.RootElement.GetProperty("unity").GetProperty("heartbeatAgeSeconds").GetDouble() >= 1.0;
+
+        string completionId = "archived-completion";
+        string completionRaw = $"{{\"id\":\"{completionId}\",\"success\":true,\"result\":{{\"outcome\":\"activated\"}}}}";
+        string archiveCompletionPath = Path.Combine(statusFixture.Outbox, "archive", completionId + ".done.json");
+        File.WriteAllText(archiveCompletionPath, completionRaw, new UTF8Encoding(false));
+        ProcessResult archiveWait = await RunProcessAsync(statusFixture,
+            new[] { "--wait-completion", Path.Combine("EditorEye", "outbox", completionId + ".done.json"), "--id", completionId, "--wait-seconds", "1" }, null);
+        bool archiveWaitPassed = archiveWait.ExitCode == 0 && Text(archiveWait.Stdout) == completionRaw;
+
+        using Fixture noStatusFixture = Fixture.Create(helperPath, "status-missing");
+        ProcessResult noStatus = await RunProcessAsync(noStatusFixture, new[] { "--status", "--id", "missing-status" }, null);
+        bool missingStatusPassed = noStatus.ExitCode == 0 && ParseJson(noStatus.Stdout).GetProperty("unity").GetProperty("statusJson").GetString() == "missing";
+        File.WriteAllText(Path.Combine(noStatusFixture.EditorEye, "status.json"), "{invalid", new UTF8Encoding(false));
+        ProcessResult unreadableStatus = await RunProcessAsync(noStatusFixture, new[] { "--status", "--id", "missing-status" }, null);
+        bool unreadableStatusPassed = unreadableStatus.ExitCode == 0 && ParseJson(unreadableStatus.Stdout).GetProperty("unity").GetProperty("statusJson").GetString() == "unreadable";
+
+        File.WriteAllText(Path.Combine(statusFixture.Outbox, "archive", "collision-archived.json"), "{}", new UTF8Encoding(false));
+        bool archiveCollision = EesTransportClient.Program.HasExistingTransportEntryForContractTest(
+            statusFixture.Inbox, statusFixture.Outbox, "collision-archived", out string collisionText);
+
+        bool passed = codeRequestPassed && wrongTool.ExitCode == 2 && duplicateCode.ExitCode == 2 && duplicateCodePath.ExitCode == 2 && missingCode.ExitCode == 2 && noRejectedCodeRequest &&
+            textStringPassed && textObjectPassed && textWithoutNestedPassed && textNullPassed && textFailurePassed && firstTenErrorsPassed && noLinePassed && asyncPassed &&
+            respondedPassed && completedPassed && queuedPassed && unknownPassed && invalidStatusId.ExitCode == 2 && statusNoSend && heartbeatAgePassed &&
+            archiveWaitPassed && missingStatusPassed && unreadableStatusPassed && archiveCollision && collisionText.Contains("archived", StringComparison.Ordinal);
+        return passed
+            ? CaseResult.Pass("10-code-file-text-status-and-archive", "code-file merge/rejections, UTF-8 text and failure summaries, async next command, status states, archive reads/collisions, and no-send checks passed")
+            : CaseResult.Fail("10-code-file-text-status-and-archive", $"code={codeFile.ExitCode}/{codeRequestPassed}, reject={wrongTool.ExitCode}/{duplicateCode.ExitCode}/{duplicateCodePath.ExitCode}/{missingCode.ExitCode}/{noRejectedCodeRequest}, text={textStringPassed}/{textObjectPassed}/{textWithoutNestedPassed}/{textNullPassed}/{textFailurePassed}/{firstTenErrorsPassed}/{noLinePassed}, async={asyncPassed}, status={respondedPassed}/{completedPassed}/{queuedPassed}/{unknownPassed}/{invalidStatusId.ExitCode}/{statusNoSend}/{heartbeatAgePassed}, archive={archiveWaitPassed}/{archiveCollision}/{collisionText}, missing/unreadableStatus={missingStatusPassed}/{unreadableStatusPassed}");
+    }
+
+    private static bool StatusHas(ProcessResult process, string state, string field, object expected)
+    {
+        if (process.ExitCode != 0)
+            return false;
+        using JsonDocument document = JsonDocument.Parse(process.Stdout);
+        JsonElement root = document.RootElement;
+        if (root.GetProperty("state").GetString() != state)
+            return false;
+        if (field == "unityState")
+            return root.GetProperty("unity").GetProperty("state").GetString() == (string)expected;
+        JsonElement value = root.GetProperty(field);
+        return expected switch
+        {
+            bool expectedBoolean => value.ValueKind == (expectedBoolean ? JsonValueKind.True : JsonValueKind.False),
+            string expectedString => value.ValueKind == JsonValueKind.String && value.GetString() == expectedString,
+            _ => false
+        };
+    }
+
+    private static JsonElement ParseJson(byte[] bytes)
+    {
+        using JsonDocument document = JsonDocument.Parse(bytes);
+        return document.RootElement.Clone();
     }
 
     private static Task<CaseResult> RunManifestAsync()

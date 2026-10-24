@@ -99,6 +99,39 @@ def main():
             if accepted:
                 assert elapsed < 1.3, elapsed
 
+        def call_with_response(args, make_response):
+            before = set(inbox.glob("*.json"))
+            observed = []
+            errors = []
+            stop = threading.Event()
+            def responder():
+                try:
+                    deadline = time.monotonic() + 3
+                    while not stop.is_set() and time.monotonic() < deadline:
+                        added = set(inbox.glob("*.json")) - before
+                        if added:
+                            request_path = next(iter(added))
+                            request = json.loads(request_path.read_bytes())
+                            raw = make_response(request)
+                            (outbox / (request["Id"] + ".json")).write_bytes(raw)
+                            observed.append((request, raw))
+                            request_path.unlink()
+                            return
+                        time.sleep(.01)
+                except Exception as exc:
+                    errors.append(repr(exc))
+            worker = threading.Thread(target=responder)
+            worker.start()
+            try:
+                proc, elapsed = invoke(args)
+            finally:
+                stop.set()
+                worker.join(4)
+            assert not errors, errors
+            assert len(observed) == 1, observed
+            assert set(inbox.glob("*.json")) == before
+            return proc, observed[0][0], observed[0][1], elapsed
+
         for success in (True, False):
             for strict in (False, True):
                 record(f"sync success={success} strict={strict}",
@@ -106,6 +139,128 @@ def main():
         record("accepted first response immediate; one publication", lambda: sync(True, True, True))
         record("strict missing success rejected", lambda: sync(True, True, invalid="missing"))
         record("legacy wrong id rejected", lambda: sync(True, invalid="wrong-id"))
+
+        def help_case():
+            before = set(inbox.glob("*.json"))
+            proc, _ = invoke(["--help"])
+            output = proc.stdout.decode("utf-8")
+            assert proc.returncode == 0 and not proc.stderr
+            for required in ("ees-call 1.2.0", "--code-file <path>", "--text", "--status --id <request-id>",
+                             "--wait-completion <path>", "archive"):
+                assert required in output, (required, output)
+            assert set(inbox.glob("*.json")) == before
+        record("--help describes version 1.2.0 and new options without transport access", help_case)
+
+        def code_file_case():
+            code = root / "スクリプト_日本語.cs"
+            params = root / "options.json"
+            code.write_bytes(b"\xff\xfe")
+            params.write_text(json.dumps({"Mode": "snippet", "NoFallback": True}), encoding="utf-8")
+            proc, request, raw, _ = call_with_response(
+                ["--tool", "execute_dynamic_script", "--code-file", str(code.relative_to(Path(temporary))), "--params-file", str(params), "--wait-seconds", "1"],
+                lambda request: response(request["Id"], result={"value": "ok"}))
+            check(proc, 0, raw)
+            assert request["Tool"] == "execute_dynamic_script"
+            assert request["Params"]["CodePath"] == str(code.resolve()).replace("\\", "/")
+            assert request["Params"]["Mode"] == "snippet" and request["Params"]["NoFallback"] is True
+            before = set(inbox.glob("*.json"))
+            for args in (["--tool", "fixture", "--code-file", str(code)],
+                         ["--tool", "execute_dynamic_script", "--code-file", str(root / "missing.cs")]):
+                rejected, _ = invoke(args)
+                check(rejected, 2)
+                assert set(inbox.glob("*.json")) == before
+            collision_params = root / "code-field.json"
+            collision_params.write_text('{"Code":"already supplied"}', encoding="utf-8")
+            rejected, _ = invoke(["--tool", "execute_dynamic_script", "--code-file", str(code), "--params-file", str(collision_params)])
+            check(rejected, 2)
+            assert set(inbox.glob("*.json")) == before
+            collision_path_params = root / "code-path-field.json"
+            collision_path_params.write_text('{"CodePath":"already-supplied.cs"}', encoding="utf-8")
+            rejected, _ = invoke(["--tool", "execute_dynamic_script", "--code-file", str(code), "--params-file", str(collision_path_params)])
+            check(rejected, 2)
+            assert set(inbox.glob("*.json")) == before
+        record("--code-file merges Japanese absolute CodePath and rejects ambiguity before send", code_file_case)
+
+        def text_case():
+            proc, request, raw, _ = call_with_response(
+                ["--tool", "text", "--text", "--wait-seconds", "1"],
+                lambda request: json.dumps({"id": request["Id"], "success": True,
+                    "result": {"result": "姿勢: 三角座り😀"}}, ensure_ascii=False).encode("utf-8"))
+            assert proc.returncode == 0 and proc.stdout == "姿勢: 三角座り😀".encode("utf-8") and not proc.stderr
+
+            proc, request, raw, _ = call_with_response(
+                ["--tool", "text-object", "--text", "--wait-seconds", "1"],
+                lambda request: json.dumps({"id": request["Id"], "success": True,
+                    "result": {"result": {"value": 7}}}, ensure_ascii=False).encode("utf-8"))
+            assert proc.returncode == 0 and proc.stdout == b'{"value": 7}' and not proc.stderr
+
+            failure = {"success": False, "error": "script failed", "result": {
+                "exception": {"type": "NullReferenceException", "sourceLine": 12,
+                              "sourceSnippet": "target.value = null;"},
+                "userFrames": [{"sourceLine": 12}, {"sourceLine": 4}],
+                "compilationErrors": [{"line": 3, "column": 5, "errorCode": "CS0103", "message": "name missing"}]}}
+            proc, request, raw, _ = call_with_response(
+                ["--tool", "text-failure", "--text", "--wait-seconds", "1"],
+                lambda request: json.dumps(dict(id=request["Id"], **failure), ensure_ascii=False).encode("utf-8"))
+            summary = proc.stdout.decode("utf-8")
+            assert proc.returncode == 0 and summary.startswith("error: script failed\n")
+            for part in ("exception.type: NullReferenceException", "exception.sourceLine: 12",
+                         "exception.sourceSnippet: target.value = null;", "userFrames: 12,4", "L3:5 CS0103 name missing"):
+                assert part in summary, summary
+
+            accepted, accepted_request, accepted_raw, _ = call_with_response(
+                ["--tool", "text-async", "--text", "--wait-seconds", "1"],
+                lambda request: json.dumps({"id": request["Id"], "success": True,
+                    "result": {"async": True, "completionFile": f"EditorEye/outbox/{request['Id']}.done.json"}}, ensure_ascii=False).encode("utf-8"))
+            completion = root / "EditorEye" / "outbox" / (accepted_request["Id"] + ".done.json")
+            expected_next = f'next: ees-call --wait-completion "{completion.resolve()}" --id {accepted_request["Id"]}\n'.encode("utf-8")
+            assert accepted.returncode == 0 and accepted.stdout == accepted_raw and accepted.stderr == expected_next
+
+            ordinary, _, _, _ = call_with_response(
+                ["--tool", "text-sync", "--wait-seconds", "1"],
+                lambda request: response(request["Id"], result={"value": 1}))
+            assert ordinary.returncode == 0 and not ordinary.stderr
+        record("--text UTF-8 values/failure details and async next command", text_case)
+
+        def status_case():
+            status_path = eye / "status.json"
+            status_path.write_text(json.dumps({"state": "compiling", "pendingRequests": 2,
+                "heartbeatUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}), encoding="utf-8")
+            archive = outbox / "archive"
+            archive.mkdir()
+            archived = "status-response"
+            (archive / (archived + ".json")).write_text(json.dumps({"id": archived, "success": True,
+                "result": {"status": "accepted", "async": True, "completionFile": "EditorEye/outbox/x.done.json"}}), encoding="utf-8")
+            done = "status-completed"
+            (archive / (done + ".done.json")).write_text(json.dumps({"id": done, "success": False,
+                "result": {"outcome": "not_applied"}}), encoding="utf-8")
+            queued = "status-queued"
+            queued_path = inbox / (queued + ".json")
+            queued_path.write_text(json.dumps({"Id": queued, "Tool": "help", "Params": {}}), encoding="utf-8")
+            before = {path.name: path.read_bytes() for path in inbox.iterdir()}
+            for identifier, expected_state in ((archived, "responded"), (done, "completed"),
+                                                (queued, "queued"), ("status-unknown", "unknown")):
+                proc, _ = invoke(["--status", "--id", identifier])
+                assert proc.returncode == 0 and not proc.stderr, (proc.returncode, proc.stderr)
+                payload = json.loads(proc.stdout)
+                assert payload["id"] == identifier and payload["state"] == expected_state
+                assert payload["unity"]["state"] == "compiling" and payload["unity"]["pendingRequests"] == 2
+            assert before == {path.name: path.read_bytes() for path in inbox.iterdir()}
+            status_path.unlink()
+            missing, _ = invoke(["--status", "--id", "status-unknown"])
+            assert missing.returncode == 0 and json.loads(missing.stdout)["unity"]["statusJson"] == "missing"
+            invalid, _ = invoke(["--status", "--id", "bad/name"])
+            check(invalid, 2)
+            assert before == {path.name: path.read_bytes() for path in inbox.iterdir()}
+
+            completion_id = "archive-wait"
+            completion_raw = json.dumps({"id": completion_id, "success": True, "result": {"outcome": "activated"}}).encode()
+            (archive / (completion_id + ".done.json")).write_bytes(completion_raw)
+            proc, _ = invoke(["--wait-completion", str((outbox / (completion_id + ".done.json")).relative_to(root)),
+                              "--id", completion_id, "--wait-seconds", "1"])
+            assert proc.returncode == 0 and proc.stdout == completion_raw
+            assert before == {path.name: path.read_bytes() for path in inbox.iterdir()}
+        record("--status four states/archive/missing status and archive completion wait are read-only", status_case)
 
         counter = 0
         def wait_case(raw_factory=None, code=0, strict=False, delay=0, absolute=False):

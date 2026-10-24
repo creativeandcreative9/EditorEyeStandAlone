@@ -8,6 +8,7 @@ namespace EesTransportClient;
 
 internal static class Program
 {
+    private const string ClientVersion = "1.2.0";
     private const double DefaultWaitSeconds = 120.0;
     private const int PollIntervalMilliseconds = 50;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -22,6 +23,12 @@ internal static class Program
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true
+    };
+    private static readonly JsonSerializerOptions OutputJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false
     };
 
     private static int Main(string[] args)
@@ -47,8 +54,10 @@ internal static class Program
         if (args.Length == 1 && (args[0] == "--help" || args[0] == "-h"))
         {
             WriteBytesToStandardOutput(Encoding.UTF8.GetBytes(
-                "Usage: ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--output-file <path>] [--wait-seconds <positive number>]\n" +
+                $"ees-call {ClientVersion}\n" +
+                "Usage: ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--code-file <path>] [--text] [--output-file <path>] [--wait-seconds <positive number>] [--fail-on-tool-error]\n" +
                 "       ees-call --wait-completion <path> --id <request-id> [--output-file <path>] [--wait-seconds <seconds>] [--fail-on-tool-error]\n" +
+                "       ees-call --status --id <request-id>\n" +
                 "       ees-call --help\n" +
                 "\n" +
                 "Send one EES request and print its first response. Place this executable in <Project>/EditorEye/.\n" +
@@ -59,7 +68,12 @@ internal static class Program
                 "Acceptance is returned immediately and is not final success.\n\n" +
                 "Options:\n" +
                 "  --fail-on-tool-error   Return 5 for outer success=false; preserve response JSON.\n" +
-                "  --wait-completion <path> Separate read-only finite wait for a done file in this project outbox.\n" +
+                "  --code-file <path>     Set Params.CodePath for execute_dynamic_script or execute_dynamic_compilation.\n" +
+                "                        Resolve from the working directory; the file must exist and Params must omit Code/CodePath.\n" +
+                "  --status               Report completed/responded/queued/unknown and Unity heartbeat without sending; requires --id.\n" +
+                "  --text                 Print result.result as UTF-8 text (other results as JSON); failures show available exception, frames, and first 10 compile errors.\n" +
+                "                        Async acceptance stays full JSON; --output-file always saves full JSON.\n" +
+                "  --wait-completion <path> Separate read-only finite wait for a done file in this project outbox; archive is checked if needed.\n" +
                 "                        Relative paths start at the project root, not the working directory.\n" +
                 "  --id <request-id>      Required with --wait-completion; validates response id.\n" +
                 "                        Never sends a tool, polls Status, or changes AutoDrive.\n" +
@@ -80,6 +94,11 @@ internal static class Program
         }
 
         CallOptions selectedOptions = options!;
+        if (selectedOptions.StatusOnly)
+        {
+            return RunStatus(selectedOptions.ExpectedId!);
+        }
+
         if (!TryPrepareOutput(selectedOptions.OutputFile, out ResponseOutput? output, out string outputError))
             return EmitError(2, selectedOptions.ExpectedId, "not-sent", null, "Output file could not be prepared. No request was sent.", outputError);
         using ResponseOutput selectedOutput = output!;
@@ -90,6 +109,11 @@ internal static class Program
         if (!TryReadParams(selectedOptions.ParamsFile, out string paramsJson, out string paramsError))
         {
             return EmitError(2, null, "not-sent", null, "Params input is invalid or could not be read.", paramsError);
+        }
+
+        if (selectedOptions.CodeFile is not null && !TryMergeCodePath(selectedOptions.Tool, selectedOptions.CodeFile, paramsJson, out paramsJson, out string codeFileError))
+        {
+            return EmitError(2, null, "not-sent", null, "--code-file is invalid. No request was sent.", codeFileError);
         }
 
         string requestId = CreateRequestId();
@@ -163,7 +187,7 @@ internal static class Program
                 TryUpdateTrace(selectedPaths.TracePath, trace);
                 try
                 {
-                    return ReturnResponse(response.Bytes!, selectedOptions.FailOnToolError, false, requestId, selectedPaths.ResponsePath, selectedOutput);
+                    return ReturnResponse(response.Bytes!, selectedOptions.FailOnToolError, false, selectedOptions.TextMode, requestId, selectedPaths.ResponsePath, selectedPaths.ProjectRoot, selectedOutput);
                 }
                 catch (Exception exception) when (exception is IOException or ObjectDisposedException or UnauthorizedAccessException)
                 {
@@ -208,14 +232,15 @@ internal static class Program
         {
             return EmitError(2, options.ExpectedId, "not-sent", null, "Invalid completion path.", exception.Message);
         }
-        ResponseWaitResult response = WaitForFirstResponse(path, options.ExpectedId!, options.WaitSeconds);
+        string archivePath = Path.Combine(paths.OutboxPath, "archive", Path.GetFileName(path));
+        ResponseWaitResult response = WaitForFirstResponse(path, options.ExpectedId!, options.WaitSeconds, archivePath);
         if (response.State == ResponseState.Timeout)
             return EmitError(3, options.ExpectedId, "completion-unconfirmed", path, "Completion deadline expired; outcome unknown. No request was sent. Recheck the same path, do not resend the tool.", response.Detail);
         if (response.State != ResponseState.Received)
             return EmitError(4, options.ExpectedId, "completion-unconfirmed", path, "Completion response was invalid or unreadable. No request was sent.", response.Detail);
         try
         {
-            return ReturnResponse(response.Bytes!, options.FailOnToolError, true, options.ExpectedId!, path, output);
+            return ReturnResponse(response.Bytes!, options.FailOnToolError, true, options.TextMode, options.ExpectedId!, response.SourcePath ?? path, paths.ProjectRoot, output);
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or UnauthorizedAccessException)
         {
@@ -224,11 +249,13 @@ internal static class Program
         }
     }
 
-    private static int ReturnResponse(byte[] bytes, bool failOnToolError, bool completion, string requestId, string path, ResponseOutput output)
+    private static int ReturnResponse(byte[] bytes, bool failOnToolError, bool completion, bool textMode, string requestId, string path, string projectRoot, ResponseOutput output)
     {
-        if (!failOnToolError && !completion)
+        if (!textMode && !failOnToolError && !completion)
         {
             output.Write(bytes);
+            if (!completion)
+                WriteNextCommandIfNeeded(bytes, requestId, projectRoot);
             return 0;
         }
         using JsonDocument document = JsonDocument.Parse(bytes, JsonValidationOptions);
@@ -236,17 +263,213 @@ internal static class Program
         if (!root.TryGetProperty("success", out JsonElement success) ||
             success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
         {
-            output.Write(bytes);
+            WriteResponseForMode(bytes, bytes, textMode, output);
             return EmitError(4, requestId, "response-unclassified", path, "Response must contain boolean envelope success for this mode.", null);
         }
         if (completion && (IsIntermediate(root) ||
             (root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object && IsIntermediate(result))))
         {
-            output.Write(bytes);
+            WriteResponseForMode(bytes, bytes, textMode, output);
             return EmitError(4, requestId, "completion-unconfirmed", path, "Completion file contains acceptance/intermediate response, not a terminal result.", null);
         }
-        output.Write(bytes);
+        byte[] stdoutBytes = textMode ? FormatTextResponse(root, success.ValueKind == JsonValueKind.True, bytes) : bytes;
+        WriteResponseForMode(bytes, stdoutBytes, textMode, output);
+        if (!completion)
+            WriteNextCommandIfNeeded(bytes, requestId, projectRoot);
         return failOnToolError && success.ValueKind == JsonValueKind.False ? 5 : 0;
+    }
+
+    private static void WriteResponseForMode(byte[] fullResponse, byte[] stdoutBytes, bool textMode, ResponseOutput output)
+    {
+        if (!textMode)
+        {
+            output.Write(fullResponse);
+            return;
+        }
+
+        if (output.HasDestination)
+        {
+            output.Write(fullResponse);
+            WriteBytesToStandardOutput(stdoutBytes);
+            return;
+        }
+
+        output.Write(stdoutBytes);
+    }
+
+    private static byte[] FormatTextResponse(JsonElement root, bool succeeded, byte[] fullResponse)
+    {
+        if (root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object &&
+            result.TryGetProperty("async", out JsonElement asyncFlag) && asyncFlag.ValueKind == JsonValueKind.True)
+            return fullResponse;
+
+        if (succeeded)
+        {
+            if (!root.TryGetProperty("result", out result))
+                return Encoding.UTF8.GetBytes("null");
+            if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("result", out JsonElement nestedResult))
+                return nestedResult.ValueKind == JsonValueKind.String
+                    ? Encoding.UTF8.GetBytes(nestedResult.GetString() ?? string.Empty)
+                    : Encoding.UTF8.GetBytes(nestedResult.GetRawText());
+            return Encoding.UTF8.GetBytes(result.GetRawText());
+        }
+
+        return Encoding.UTF8.GetBytes(FormatFailureSummary(root));
+    }
+
+    private static string FormatFailureSummary(JsonElement root)
+    {
+        List<string> lines = new();
+        if (root.TryGetProperty("error", out JsonElement error) && error.ValueKind == JsonValueKind.String)
+            lines.Add("error: " + OneLine(error.GetString()));
+        else if (root.TryGetProperty("errorCode", out JsonElement errorCode) && errorCode.ValueKind == JsonValueKind.String)
+            lines.Add("errorCode: " + OneLine(errorCode.GetString()));
+
+        if (TryFindProperty(root, "exception", out JsonElement exception) && exception.ValueKind == JsonValueKind.Object)
+        {
+            AddStringField(lines, exception, "type", "exception.type");
+            AddValueField(lines, exception, "sourceLine", "exception.sourceLine");
+            AddStringField(lines, exception, "sourceSnippet", "exception.sourceSnippet");
+        }
+
+        if (TryFindProperty(root, "userFrames", out JsonElement userFrames))
+        {
+            string frameLines = FormatUserFrameLines(userFrames);
+            if (frameLines.Length > 0)
+                lines.Add("userFrames: " + frameLines);
+        }
+
+        if (TryFindProperty(root, "compilationErrors", out JsonElement compilationErrors) && compilationErrors.ValueKind == JsonValueKind.Array)
+        {
+            int count = 0;
+            foreach (JsonElement diagnostic in compilationErrors.EnumerateArray())
+            {
+                if (count++ == 10)
+                    break;
+                if (diagnostic.ValueKind == JsonValueKind.Object)
+                    lines.Add(FormatCompilationError(diagnostic));
+                else
+                    lines.Add("compilationError: " + OneLine(diagnostic.GetRawText()));
+            }
+        }
+
+        if (lines.Count == 0)
+            lines.Add("error: Request failed.");
+        return string.Join("\n", lines) + "\n";
+    }
+
+    private static string FormatUserFrameLines(JsonElement frames)
+    {
+        if (frames.ValueKind != JsonValueKind.Array)
+            return string.Empty;
+
+        List<string> lines = new();
+        foreach (JsonElement frame in frames.EnumerateArray())
+        {
+            if (frame.ValueKind == JsonValueKind.Number)
+                lines.Add(frame.GetRawText());
+            else if (frame.ValueKind == JsonValueKind.Object &&
+                     (TryGetProperty(frame, "sourceLine", out JsonElement sourceLine) || TryGetProperty(frame, "line", out sourceLine)) &&
+                     sourceLine.ValueKind == JsonValueKind.Number)
+                lines.Add(sourceLine.GetRawText());
+        }
+        return string.Join(",", lines);
+    }
+
+    private static string FormatCompilationError(JsonElement diagnostic)
+    {
+        string line = GetFirstValue(diagnostic, "line", "sourceLine");
+        string column = GetFirstValue(diagnostic, "column", "col");
+        string code = GetFirstValue(diagnostic, "errorCode", "code");
+        string message = GetFirstValue(diagnostic, "message");
+        return $"L{line}:{column} {code} {OneLine(message)}".TrimEnd();
+    }
+
+    private static string GetFirstValue(JsonElement value, params string[] names)
+    {
+        foreach (string name in names)
+        {
+            if (TryGetProperty(value, name, out JsonElement field) && field.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+                return field.ValueKind == JsonValueKind.String ? field.GetString() ?? string.Empty : field.GetRawText();
+        }
+        return "?";
+    }
+
+    private static void AddStringField(List<string> lines, JsonElement value, string propertyName, string label)
+    {
+        if (TryGetProperty(value, propertyName, out JsonElement field) && field.ValueKind == JsonValueKind.String)
+            lines.Add(label + ": " + OneLine(field.GetString()));
+    }
+
+    private static void AddValueField(List<string> lines, JsonElement value, string propertyName, string label)
+    {
+        if (TryGetProperty(value, propertyName, out JsonElement field) && field.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+            lines.Add(label + ": " + OneLine(field.ValueKind == JsonValueKind.String ? field.GetString() : field.GetRawText()));
+    }
+
+    private static string OneLine(string? value) => (value ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ');
+
+    private static bool TryGetProperty(JsonElement value, string name, out JsonElement property)
+    {
+        if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out property))
+            return true;
+        property = default;
+        return false;
+    }
+
+    private static bool TryFindProperty(JsonElement root, string name, out JsonElement match)
+    {
+        Stack<JsonElement> pending = new();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            JsonElement current = pending.Pop();
+            if (current.ValueKind == JsonValueKind.Object)
+            {
+                foreach (JsonProperty property in current.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, name, StringComparison.Ordinal))
+                    {
+                        match = property.Value;
+                        return true;
+                    }
+                    pending.Push(property.Value);
+                }
+            }
+            else if (current.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement item in current.EnumerateArray())
+                    pending.Push(item);
+            }
+        }
+
+        match = default;
+        return false;
+    }
+
+    private static void WriteNextCommandIfNeeded(byte[] bytes, string requestId, string projectRoot)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes, JsonValidationOptions);
+            JsonElement root = document.RootElement;
+            if (!root.TryGetProperty("result", out JsonElement result) || result.ValueKind != JsonValueKind.Object ||
+                !result.TryGetProperty("async", out JsonElement asyncFlag) || asyncFlag.ValueKind != JsonValueKind.True ||
+                !result.TryGetProperty("completionFile", out JsonElement completionFile) || completionFile.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(completionFile.GetString()))
+                return;
+
+            string absolutePath = Path.GetFullPath(completionFile.GetString()!, projectRoot);
+            string command = $"next: ees-call --wait-completion \"{absolutePath}\" --id {requestId}\n";
+            using Stream stderr = Console.OpenStandardError();
+            byte[] commandBytes = Encoding.UTF8.GetBytes(command);
+            stderr.Write(commandBytes, 0, commandBytes.Length);
+            stderr.Flush();
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            // A malformed completion path is retained in the full response; do not alter its result.
+        }
     }
 
     private static bool IsIntermediate(JsonElement value)
@@ -266,10 +489,14 @@ internal static class Program
         bool waitSpecified = false;
         bool toolSpecified = false;
         bool paramsSpecified = false;
+        bool codeFileSpecified = false;
         bool failOnToolError = false;
+        bool statusOnly = false;
+        bool textMode = false;
         string? completionPath = null;
         string? expectedId = null;
         string? outputFile = null;
+        string? codeFile = null;
 
         for (int index = 0; index < args.Length; index++)
         {
@@ -291,6 +518,36 @@ internal static class Program
                     return false;
                 }
                 failOnToolError = true;
+                continue;
+            }
+            if (key == "--status")
+            {
+                if (statusOnly || inlineValue is not null)
+                {
+                    error = "--status is a flag allowed once.";
+                    return false;
+                }
+                statusOnly = true;
+                continue;
+            }
+            if (key == "--text")
+            {
+                if (textMode || inlineValue is not null)
+                {
+                    error = "--text is a flag allowed once.";
+                    return false;
+                }
+                textMode = true;
+                continue;
+            }
+            if (key == "--code-file")
+            {
+                if (codeFileSpecified || !TryReadOptionValue(args, ref index, inlineValue, out codeFile) || string.IsNullOrWhiteSpace(codeFile))
+                {
+                    error = "--code-file requires one non-empty path and is allowed once.";
+                    return false;
+                }
+                codeFileSpecified = true;
                 continue;
             }
             if (key == "--wait-completion" || key == "--id")
@@ -358,13 +615,30 @@ internal static class Program
             return false;
         }
 
-        if (completionPath is not null ? (toolSpecified || paramsSpecified || expectedId is null) : (!toolSpecified || expectedId is not null))
+        if (statusOnly)
         {
-            error = "Use --tool, or --wait-completion with --id; completion mode forbids --tool and --params-file.";
+            if (expectedId is null || completionPath is not null || toolSpecified || paramsSpecified || codeFileSpecified ||
+                outputFile is not null || failOnToolError || textMode || waitSpecified)
+            {
+                error = "Use --status --id <request-id>; status mode is read-only and accepts no other options.";
+                return false;
+            }
+        }
+        else if (completionPath is not null)
+        {
+            if (toolSpecified || paramsSpecified || codeFileSpecified || textMode || expectedId is null)
+            {
+                error = "Completion mode requires --wait-completion and --id; it forbids --tool, --params-file, --code-file, and --text.";
+                return false;
+            }
+        }
+        else if (!toolSpecified || expectedId is not null)
+        {
+            error = "Use --tool, --status --id, or --wait-completion with --id.";
             return false;
         }
 
-        options = new CallOptions(tool ?? string.Empty, paramsFile, waitSeconds, failOnToolError, completionPath, expectedId, outputFile);
+        options = new CallOptions(tool ?? string.Empty, paramsFile, codeFile, waitSeconds, failOnToolError, textMode, statusOnly, completionPath, expectedId, outputFile);
         return true;
     }
 
@@ -486,6 +760,53 @@ internal static class Program
         }
     }
 
+    private static bool TryMergeCodePath(string tool, string codeFile, string paramsJson, out string mergedParams, out string error)
+    {
+        mergedParams = paramsJson;
+        error = string.Empty;
+        if (!string.Equals(tool, "execute_dynamic_script", StringComparison.Ordinal) &&
+            !string.Equals(tool, "execute_dynamic_compilation", StringComparison.Ordinal))
+        {
+            error = "--code-file is only valid with execute_dynamic_script or execute_dynamic_compilation.";
+            return false;
+        }
+
+        try
+        {
+            string absoluteCodePath = Path.GetFullPath(codeFile);
+            if (!File.Exists(absoluteCodePath))
+            {
+                error = $"Code file does not exist: '{absoluteCodePath}'.";
+                return false;
+            }
+
+            using JsonDocument document = JsonDocument.Parse(paramsJson, JsonValidationOptions);
+            JsonElement parameters = document.RootElement;
+            int propertyCount = 0;
+            foreach (JsonProperty property in parameters.EnumerateObject())
+            {
+                propertyCount++;
+                if (string.Equals(property.Name, "Code", StringComparison.Ordinal) ||
+                    string.Equals(property.Name, "CodePath", StringComparison.Ordinal))
+                {
+                    error = $"--params-file already contains '{property.Name}'; use either --code-file or that field.";
+                    return false;
+                }
+            }
+
+            string trimmedParams = paramsJson.Trim();
+            string normalizedCodePath = absoluteCodePath.Replace('\\', '/');
+            string propertyJson = "\"CodePath\":" + JsonSerializer.Serialize(normalizedCodePath);
+            mergedParams = trimmedParams[..^1] + (propertyCount > 0 ? "," : string.Empty) + propertyJson + "}";
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or JsonException)
+        {
+            error = exception.Message;
+            return false;
+        }
+    }
+
     private static byte[] BuildRequestJson(string requestId, string tool, string paramsJson)
     {
         using var buffer = new MemoryStream();
@@ -549,6 +870,140 @@ internal static class Program
         }
     }
 
+    private static int RunStatus(string requestId)
+    {
+        if (!IsValidRequestId(requestId))
+            return EmitError(2, requestId, "not-sent", null, "Invalid request id for --status.", null);
+        if (!TryResolveTransportPaths(out TransportPaths? paths, out string pathError))
+            return EmitError(4, requestId, "unknown", null, "Could not locate project transport folders.", pathError);
+
+        TransportPaths selectedPaths = paths!;
+        var status = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["id"] = requestId
+        };
+        string? donePath = FindFirstExisting(
+            Path.Combine(selectedPaths.OutboxPath, requestId + ".done.json"),
+            Path.Combine(selectedPaths.ArchivePath, requestId + ".done.json"));
+        string? responsePath = FindFirstExisting(
+            Path.Combine(selectedPaths.OutboxPath, requestId + ".json"),
+            Path.Combine(selectedPaths.ArchivePath, requestId + ".json"));
+
+        if (donePath is not null)
+        {
+            status["state"] = "completed";
+            AddResponseFields(status, donePath, completion: true);
+        }
+        else if (responsePath is not null)
+        {
+            status["state"] = "responded";
+            AddResponseFields(status, responsePath, completion: false);
+        }
+        else if (File.Exists(Path.Combine(selectedPaths.InboxPath, requestId + ".json")))
+        {
+            status["state"] = "queued";
+        }
+        else
+        {
+            status["state"] = "unknown";
+        }
+
+        status["unity"] = ReadUnityStatus(Path.Combine(selectedPaths.ProjectRoot, "EditorEye", "status.json"));
+        byte[] output = JsonSerializer.SerializeToUtf8Bytes(status, OutputJsonOptions);
+        using Stream stdout = Console.OpenStandardOutput();
+        stdout.Write(output, 0, output.Length);
+        stdout.WriteByte((byte)'\n');
+        stdout.Flush();
+        return 0;
+    }
+
+    private static bool IsValidRequestId(string requestId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId) || requestId != requestId.Trim() || requestId is "." or ".." || requestId.EndsWith(".", StringComparison.Ordinal))
+            return false;
+        foreach (char character in requestId)
+        {
+            if (char.IsControl(character) || character is '<' or '>' or ':' or '"' or '/' or '\\' or '|' or '?' or '*')
+                return false;
+        }
+        return true;
+    }
+
+    private static string? FindFirstExisting(string first, string second)
+    {
+        if (File.Exists(first))
+            return first;
+        return File.Exists(second) ? second : null;
+    }
+
+    private static void AddResponseFields(Dictionary<string, object?> destination, string responsePath, bool completion)
+    {
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(responsePath);
+            _ = StrictUtf8.GetString(bytes);
+            using JsonDocument document = JsonDocument.Parse(bytes, JsonValidationOptions);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new JsonException("Response root must be an object.");
+            CopyIfPresent(root, destination, "success");
+            if (!root.TryGetProperty("result", out JsonElement result) || result.ValueKind != JsonValueKind.Object)
+                return;
+            if (completion)
+                CopyIfPresent(result, destination, "outcome");
+            else
+            {
+                CopyIfPresent(result, destination, "status");
+                CopyIfPresent(result, destination, "async");
+                CopyIfPresent(result, destination, "completionFile");
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or DecoderFallbackException)
+        {
+            destination["responseReadError"] = OneLine(exception.Message);
+        }
+    }
+
+    private static void CopyIfPresent(JsonElement source, Dictionary<string, object?> destination, string propertyName)
+    {
+        if (source.TryGetProperty(propertyName, out JsonElement value))
+            destination[propertyName] = value.Clone();
+    }
+
+    private static Dictionary<string, object?> ReadUnityStatus(string statusPath)
+    {
+        var unity = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (!File.Exists(statusPath))
+        {
+            unity["statusJson"] = "missing";
+            return unity;
+        }
+
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(statusPath);
+            _ = StrictUtf8.GetString(bytes);
+            using JsonDocument document = JsonDocument.Parse(bytes, JsonValidationOptions);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new JsonException("status.json root must be an object.");
+            CopyIfPresent(root, unity, "state");
+            CopyIfPresent(root, unity, "pendingRequests");
+            CopyIfPresent(root, unity, "heartbeatUtc");
+            if (root.TryGetProperty("heartbeatUtc", out JsonElement heartbeat) && heartbeat.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(heartbeat.GetString(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset heartbeatUtc))
+                unity["heartbeatAgeSeconds"] = Math.Round((DateTimeOffset.UtcNow - heartbeatUtc).TotalSeconds, 1, MidpointRounding.AwayFromZero);
+            return unity;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or DecoderFallbackException)
+        {
+            unity["statusJson"] = "unreadable";
+            unity["error"] = OneLine(exception.Message);
+            return unity;
+        }
+    }
+
     private static bool TryReadExistingEntries(TransportPaths paths, string requestId, out string collision, out string error)
     {
         collision = string.Empty;
@@ -558,6 +1013,8 @@ internal static class Program
             string requestPath = Path.Combine(paths.InboxPath, requestId + ".json");
             string responsePath = Path.Combine(paths.OutboxPath, requestId + ".json");
             string donePath = Path.Combine(paths.OutboxPath, requestId + ".done.json");
+            string archivedResponsePath = Path.Combine(paths.ArchivePath, requestId + ".json");
+            string archivedDonePath = Path.Combine(paths.ArchivePath, requestId + ".done.json");
             if (File.Exists(requestPath))
             {
                 collision = $"Existing inbox request: '{requestPath}'.";
@@ -569,6 +1026,14 @@ internal static class Program
             else if (File.Exists(donePath))
             {
                 collision = $"Existing completion response: '{donePath}'.";
+            }
+            else if (File.Exists(archivedResponsePath))
+            {
+                collision = $"Existing archived outbox response: '{archivedResponsePath}'.";
+            }
+            else if (File.Exists(archivedDonePath))
+            {
+                collision = $"Existing archived completion response: '{archivedDonePath}'.";
             }
 
             return true;
@@ -636,20 +1101,23 @@ internal static class Program
         return result.ExitCode;
     }
 
-    private static ResponseWaitResult WaitForFirstResponse(string responsePath, string requestId, double waitSeconds)
+    private static ResponseWaitResult WaitForFirstResponse(string responsePath, string requestId, double waitSeconds, string? fallbackPath = null)
     {
         long started = Stopwatch.GetTimestamp();
         bool responseSeen = false;
         string? lastIssue = null;
         while (Stopwatch.GetElapsedTime(started).TotalSeconds < waitSeconds)
         {
-            if (File.Exists(responsePath))
+            string? availablePath = File.Exists(responsePath)
+                ? responsePath
+                : fallbackPath is not null && File.Exists(fallbackPath) ? fallbackPath : null;
+            if (availablePath is not null)
             {
                 responseSeen = true;
-                ResponseReadResult read = TryReadResponse(responsePath, requestId);
+                ResponseReadResult read = TryReadResponse(availablePath, requestId);
                 if (read.State == ResponseReadState.Valid)
                 {
-                    return ResponseWaitResult.Received(read.Bytes!);
+                    return ResponseWaitResult.Received(read.Bytes!, availablePath);
                 }
 
                 if (read.State == ResponseReadState.Invalid)
@@ -665,12 +1133,14 @@ internal static class Program
             Thread.Sleep(delay);
         }
 
-        if (responseSeen || File.Exists(responsePath))
+        if (responseSeen || File.Exists(responsePath) || (fallbackPath is not null && File.Exists(fallbackPath)))
         {
             return ResponseWaitResult.Invalid(lastIssue ?? "The response file existed but could not be read.");
         }
 
-        return ResponseWaitResult.Timeout($"No response appeared at '{responsePath}'.");
+        return ResponseWaitResult.Timeout(fallbackPath is null
+            ? $"No response appeared at '{responsePath}'."
+            : $"No response appeared at '{responsePath}' or its archive path '{fallbackPath}'.");
     }
 
     private static ResponseReadResult TryReadResponse(string responsePath, string requestId)
@@ -829,7 +1299,7 @@ internal static class Program
         }
     }
 
-    private sealed record CallOptions(string Tool, string? ParamsFile, double WaitSeconds, bool FailOnToolError, string? CompletionPath, string? ExpectedId, string? OutputFile);
+    private sealed record CallOptions(string Tool, string? ParamsFile, string? CodeFile, double WaitSeconds, bool FailOnToolError, bool TextMode, bool StatusOnly, string? CompletionPath, string? ExpectedId, string? OutputFile);
 
     private sealed class ResponseOutput : IDisposable
     {
@@ -845,6 +1315,7 @@ internal static class Program
         }
 
         public string Description => destination is null ? "stdout" : $"output file '{destination}'";
+        public bool HasDestination => destination is not null;
 
         public void Write(byte[] bytes)
         {
@@ -884,6 +1355,7 @@ internal static class Program
         public string ProjectRoot { get; }
         public string InboxPath { get; }
         public string OutboxPath { get; }
+        public string ArchivePath => Path.Combine(OutboxPath, "archive");
         public string RequestPath => Path.Combine(InboxPath, CurrentRequestId! + ".json");
         public string ResponsePath => Path.Combine(OutboxPath, CurrentRequestId! + ".json");
         public string DonePath => Path.Combine(OutboxPath, CurrentRequestId! + ".done.json");
@@ -948,20 +1420,22 @@ internal static class Program
 
     private sealed class ResponseWaitResult
     {
-        private ResponseWaitResult(ResponseState state, byte[]? bytes, string? detail)
+        private ResponseWaitResult(ResponseState state, byte[]? bytes, string? detail, string? sourcePath)
         {
             State = state;
             Bytes = bytes;
             Detail = detail;
+            SourcePath = sourcePath;
         }
 
         public ResponseState State { get; }
         public byte[]? Bytes { get; }
         public string? Detail { get; }
+        public string? SourcePath { get; }
 
-        public static ResponseWaitResult Received(byte[] bytes) => new(ResponseState.Received, bytes, null);
-        public static ResponseWaitResult Timeout(string detail) => new(ResponseState.Timeout, null, detail);
-        public static ResponseWaitResult Invalid(string detail) => new(ResponseState.Invalid, null, detail);
+        public static ResponseWaitResult Received(byte[] bytes, string sourcePath) => new(ResponseState.Received, bytes, null, sourcePath);
+        public static ResponseWaitResult Timeout(string detail) => new(ResponseState.Timeout, null, detail, null);
+        public static ResponseWaitResult Invalid(string detail) => new(ResponseState.Invalid, null, detail, null);
     }
 
     private enum ResponseReadState
