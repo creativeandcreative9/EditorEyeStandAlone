@@ -1,5 +1,9 @@
 # Benchmark: Unity official CLI vs EES (October 2026)
 
+> **Superseded.** This is the earlier one-run-per-task measurement (2026-10-16, mixed EES versions). The current result is the 5-run measurement with EES 12.3.6: [2026-10-unity-cli-vs-ees-5runs](../2026-10-unity-cli-vs-ees-5runs/README.md). The two were measured under different conditions; do not combine their numbers. The "fewer tokens on all 7 tasks" statement below does not hold in the 5-run measurement.
+>
+> **置き換え済みです。** これは、各課題1回だけの前回の測定（2026-10-16、EESの版が混在）です。現在の結果は、EES 12.3.6での5回測定です：[2026-10-unity-cli-vs-ees-5runs](../2026-10-unity-cli-vs-ees-5runs/README.md#日本語)。条件が違うため、数値を混ぜないでください。下の「7課題すべてでEESが少ない」は、5回測定では成り立ちません。
+
 The same AI agent did the same seven Unity tasks with Unity's official CLI and with EES. We measured whether each run was correct, how many tokens it used, and how long it took. Task 2 uses a later EES 12.3.0 rerun; the other six EES tasks use 12.2.9, and all CLI results are unchanged.
 
 **Results:** both methods completed all 7 tasks. EES used **56.4% fewer total tokens** (2,979,091 vs 6,835,375) and fewer tokens on all 7 tasks. Total time was 950 s vs 1,008 s. On task 2, running a test, EES used fewer tokens but still took longer (73 s vs 44 s).
