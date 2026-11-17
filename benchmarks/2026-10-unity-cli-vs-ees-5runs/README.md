@@ -2,7 +2,7 @@
 
 The same AI agent did the same seven Unity tasks with Unity's official CLI and with EES, five times per task and method. We measured whether each run was correct, how many tokens it used, the estimated cost, and the elapsed time.
 
-This measurement replaces the earlier one-run-per-task comparison ([2026-10-unity-cli-vs-ees](../2026-10-unity-cli-vs-ees/README.md)). The two used different versions and conditions, so do not combine their numbers.
+This measurement replaces the earlier one-run-per-task comparison (2026-10-16, mixed EES versions), which has been removed. Do not combine the numbers of the two.
 
 [日本語は下にあります](#日本語)
 
@@ -77,7 +77,7 @@ Per-pair ratios: [pair-ratios.csv](pair-ratios.csv).
 
 同じAIエージェントに、Unityの同じ7つの作業を、Unity公式CLIとEESで、課題ごと・方式ごとに5回ずつ行わせました。正しくできたか、使ったトークンの数、推定費用、かかった時間を測りました。
 
-この測定は、前回の「各課題1回」の比較（[2026-10-unity-cli-vs-ees](../2026-10-unity-cli-vs-ees/README.md)）に置き換わるものです。版や条件が違うため、2つの数値を混ぜて読まないでください。
+この測定は、前回の「各課題1回」の比較（2026-10-16、EESの版が混在）に置き換わるもので、前回の資料は削除しました。2つの数値を混ぜて読まないでください。
 
 ### 結果
 
