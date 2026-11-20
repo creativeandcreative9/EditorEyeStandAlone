@@ -8,7 +8,7 @@ namespace EesTransportClient;
 
 internal static class Program
 {
-    private const string ClientVersion = "1.2.0";
+    private const string ClientVersion = "1.2.1";
     private const double DefaultWaitSeconds = 120.0;
     private const int PollIntervalMilliseconds = 50;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -611,7 +611,7 @@ internal static class Program
                 continue;
             }
 
-            error = $"Unknown argument '{argument}'.";
+            error = $"Unknown argument '{argument}'. {UnknownArgumentHint(key)}";
             return false;
         }
 
@@ -698,6 +698,19 @@ internal static class Program
             resolved = new DirectoryInfo(resolved).ResolveLinkTarget(returnFinalTarget: true)?.FullName
                 ?? throw new IOException("Could not resolve directory link: " + resolved);
         return resolved;
+    }
+
+    private static string UnknownArgumentHint(string key)
+    {
+        const string General = "'ees-call --help' lists ees-call's own options; '--tool help' asks EES for tool help.";
+        return key switch
+        {
+            "--args" or "--params" or "--parameters" or "--json" or "--input" =>
+                "Tool parameters are passed as a UTF-8 JSON file: --params-file <path> (or '-' for stdin). " + General,
+            "--code" or "--code-path" or "--script" or "--file" =>
+                "Source code is passed as a file: --code-file <path> (execute_dynamic_script / execute_dynamic_compilation only). " + General,
+            _ => General,
+        };
     }
 
     private static bool TryReadOptionValue(string[] args, ref int index, string? inlineValue, out string? value)

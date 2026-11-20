@@ -145,11 +145,11 @@ def main():
             proc, _ = invoke(["--help"])
             output = proc.stdout.decode("utf-8")
             assert proc.returncode == 0 and not proc.stderr
-            for required in ("ees-call 1.2.0", "--code-file <path>", "--text", "--status --id <request-id>",
+            for required in ("ees-call 1.2.1", "--code-file <path>", "--text", "--status --id <request-id>",
                              "--wait-completion <path>", "archive"):
                 assert required in output, (required, output)
             assert set(inbox.glob("*.json")) == before
-        record("--help describes version 1.2.0 and new options without transport access", help_case)
+        record("--help describes version 1.2.1 and new options without transport access", help_case)
 
         def code_file_case():
             code = root / "スクリプト_日本語.cs"
@@ -338,7 +338,25 @@ def main():
                 check(proc, 2)
                 assert before == {p.name: p.read_bytes() for p in inbox.iterdir()}
             record("invalid arguments " + repr(args), invalid_case)
-    report = dict(binary=str(binary), sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+
+        hint_cases = {
+            "--args": ["--params-file"],
+            "--params": ["--params-file"],
+            "--code-path": ["--code-file"],
+            "--unknown": ["--help", "--tool help"],
+        }
+        for flag, required in hint_cases.items():
+            def hint_case(flag=flag, required=required):
+                before = {p.name: p.read_bytes() for p in inbox.iterdir()}
+                proc, _ = invoke(["--tool", "help", flag, "{}"])
+                check(proc, 2)
+                detail = json.loads(proc.stderr)["detail"]
+                assert f"Unknown argument '{flag}'" in detail, detail
+                for text in required:
+                    assert text in detail, (text, detail)
+                assert before == {p.name: p.read_bytes() for p in inbox.iterdir()}
+            record("unknown argument hint " + flag, hint_case)
+    report =dict(binary=str(binary), sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                   passed=sum(r["passed"] for r in results), total=len(results), tests=results)
     evidence.parent.mkdir(parents=True, exist_ok=True)
     evidence.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
