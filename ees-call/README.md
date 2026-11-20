@@ -17,7 +17,7 @@ The executable is not code-signed, so Windows SmartScreen may warn on first run.
 ## Usage
 
 ```
-ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--code-file <path>] [--text] [--output-file <path>] [--wait-seconds <seconds>] [--fail-on-tool-error]
+ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--code-file <path>] [--text] [--output-file <path>] [--wait-seconds <seconds>] [--follow-seconds <seconds>] [--fail-on-tool-error]
 ees-call --wait-completion <path> --id <request-id> [--output-file <path>] [--wait-seconds <seconds>] [--fail-on-tool-error]
 ees-call --status --id <request-id>
 ees-call --help
@@ -35,9 +35,10 @@ $ees = '<Your Unity Project>/EditorEye/ees-call.exe'
 - `--text` prints a successful `result.result` string directly, or JSON for a non-string result. For failures it prints the error, available exception/source lines and user frames, and up to 10 compilation errors. Async acceptance stays full JSON. Output is UTF-8 without a BOM.
 - `--output-file` saves the exact full UTF-8 response to a new file. With `--text`, stdout contains the text summary while the file keeps the full response. Use it from PowerShell to avoid text-encoding problems with non-ASCII responses.
 - `--wait-seconds` is the response deadline. Default: 120.
+- `--follow-seconds` (optional): if the first response is an async acceptance with a `completionFile`, keep waiting up to that many seconds and print the terminal result in the same command (same output and exit codes as `--wait-completion`). It is a separate budget from `--wait-seconds`; expiry exits 3 (outcome unknown, do not resend) and the error names the `--wait-completion` command to wait again. Responses that are not async acceptances are unchanged. Not allowed with `--status` or `--wait-completion`.
 - `--status --id <request-id>` reports `completed`, `responded`, `queued`, or `unknown`, plus available `status.json` state and heartbeat, without sending anything. It checks outbox `archive/` too and returns one JSON line.
 - An accepted (asynchronous) response is returned immediately and is not final success. Use `--wait-completion` with the reported completion file and request id for a separate, read-only wait; if it has moved, the same filename is read from outbox `archive/`.
-- An async response with `completionFile` also prints the next `--wait-completion` command to stderr. It does not wait automatically.
+- An async response with `completionFile` also prints the next `--wait-completion` command to stderr. It does not wait unless `--follow-seconds` is given.
 
 | Exit code | Meaning |
 |---|---|

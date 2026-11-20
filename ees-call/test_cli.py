@@ -145,11 +145,11 @@ def main():
             proc, _ = invoke(["--help"])
             output = proc.stdout.decode("utf-8")
             assert proc.returncode == 0 and not proc.stderr
-            for required in ("ees-call 1.2.1", "--code-file <path>", "--text", "--status --id <request-id>",
-                             "--wait-completion <path>", "archive"):
+            for required in ("ees-call 1.3.0", "--code-file <path>", "--text", "--status --id <request-id>",
+                             "--wait-completion <path>", "--follow-seconds", "archive"):
                 assert required in output, (required, output)
             assert set(inbox.glob("*.json")) == before
-        record("--help describes version 1.2.1 and new options without transport access", help_case)
+        record("--help describes version 1.3.0 and new options without transport access", help_case)
 
         def code_file_case():
             code = root / "スクリプト_日本語.cs"
@@ -322,7 +322,58 @@ def main():
             record(name, lambda f=factory: wait_case(f, 4))
         record("timeout then late done reread", lambda: wait_case(lambda i: None, 3))
 
+        def follow_case(done_payload, delay, extra, expected_code, expect_done=True):
+            def accept(request):
+                identifier = request["Id"]
+                if done_payload is not None:
+                    payload = dict(id=identifier, **done_payload)
+                    target = outbox / (identifier + ".done.json")
+                    threading.Timer(delay, lambda: target.write_bytes(
+                        json.dumps(payload, ensure_ascii=False).encode("utf-8"))).start()
+                return json.dumps({"id": identifier, "success": True, "result": {"async": True, "accepted": True,
+                    "completionFile": f"EditorEye/outbox/{identifier}.done.json"}}).encode("utf-8")
+            proc, request, _, elapsed = call_with_response(
+                ["--tool", "fixture-follow", "--wait-seconds", "1"] + extra, accept)
+            time.sleep(delay + .1)
+            return proc, request, elapsed
+
+        def follow_success():
+            proc, request, elapsed = follow_case({"success": True, "result": {"outcome": "activated"}}, .4,
+                                                 ["--follow-seconds", "3"], 0)
+            assert proc.returncode == 0 and not proc.stderr, (proc.returncode, proc.stderr)
+            body = json.loads(proc.stdout)
+            assert body["id"] == request["Id"] and body["result"]["outcome"] == "activated", body
+            assert elapsed >= .35, elapsed
+        record("--follow-seconds returns the terminal completion in one command", follow_success)
+
+        def follow_strict_failure():
+            proc, _, _ = follow_case({"success": False, "result": {"outcome": "not_applied"}}, .2,
+                                     ["--follow-seconds", "3", "--fail-on-tool-error"], 5)
+            assert proc.returncode == 5, (proc.returncode, proc.stderr)
+            assert json.loads(proc.stdout)["result"]["outcome"] == "not_applied"
+        record("--follow-seconds keeps --fail-on-tool-error exit 5 for a failed completion", follow_strict_failure)
+
+        def follow_timeout():
+            proc, request, elapsed = follow_case(None, 0, ["--follow-seconds", "0.5"], 3)
+            assert proc.returncode == 3, (proc.returncode, proc.stderr)
+            error = json.loads(proc.stderr)
+            assert error["submissionState"] == "completion-unconfirmed", error
+            assert "--wait-completion" in json.dumps(error) and request["Id"] in json.dumps(error), error
+            assert 0.4 <= elapsed < 2.5, elapsed
+        record("--follow-seconds expiry is exit 3 completion-unconfirmed and never resends", follow_timeout)
+
+        def follow_ordinary():
+            proc, _, raw, _ = call_with_response(
+                ["--tool", "fixture-sync", "--wait-seconds", "1", "--follow-seconds", "3"],
+                lambda request: response(request["Id"], result={"value": 1}))
+            assert proc.returncode == 0 and proc.stdout == raw and not proc.stderr
+        record("--follow-seconds does not alter a non-async response", follow_ordinary)
+
         invalid_args = [[], ["--unknown"], ["--fail-on-tool-error=true", "--tool", "x"],
+                        ["--tool", "x", "--follow-seconds", "0"], ["--tool", "x", "--follow-seconds", "NaN"],
+                        ["--tool", "x", "--follow-seconds", "1", "--follow-seconds", "2"],
+                        ["--status", "--id", "x", "--follow-seconds", "1"],
+                        ["--wait-completion", "EditorEye/outbox/x.done.json", "--id", "x", "--follow-seconds", "1"],
                         ["--tool", "x", "--fail-on-tool-error", "--fail-on-tool-error"],
                         ["--wait-completion", "EditorEye/outbox/x.done.json"],
                         ["--id", "x", "--tool", "x"]]

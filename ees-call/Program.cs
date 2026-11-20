@@ -8,7 +8,7 @@ namespace EesTransportClient;
 
 internal static class Program
 {
-    private const string ClientVersion = "1.2.1";
+    private const string ClientVersion = "1.3.0";
     private const double DefaultWaitSeconds = 120.0;
     private const int PollIntervalMilliseconds = 50;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -55,7 +55,7 @@ internal static class Program
         {
             WriteBytesToStandardOutput(Encoding.UTF8.GetBytes(
                 $"ees-call {ClientVersion}\n" +
-                "Usage: ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--code-file <path>] [--text] [--output-file <path>] [--wait-seconds <positive number>] [--fail-on-tool-error]\n" +
+                "Usage: ees-call --tool <name> [--params-file <UTF-8 JSON path or ->] [--code-file <path>] [--text] [--output-file <path>] [--wait-seconds <positive number>] [--follow-seconds <positive number>] [--fail-on-tool-error]\n" +
                 "       ees-call --wait-completion <path> --id <request-id> [--output-file <path>] [--wait-seconds <seconds>] [--fail-on-tool-error]\n" +
                 "       ees-call --status --id <request-id>\n" +
                 "       ees-call --help\n" +
@@ -65,7 +65,7 @@ internal static class Program
                 "Exit codes: 0=response received (including tool failure by default), 2=invalid input,\n" +
                 "3=deadline expired (outcome unknown; do not resend), 4=invalid response/I/O state,\n" +
                 "5=outer success=false with --fail-on-tool-error. Inspect tool-specific outcomes.\n" +
-                "Acceptance is returned immediately and is not final success.\n\n" +
+                "Acceptance is returned immediately and is not final success unless --follow-seconds is given.\n\n" +
                 "Options:\n" +
                 "  --fail-on-tool-error   Return 5 for outer success=false; preserve response JSON.\n" +
                 "  --code-file <path>     Set Params.CodePath for execute_dynamic_script or execute_dynamic_compilation.\n" +
@@ -84,6 +84,9 @@ internal static class Program
                 "                        Relative to working directory; parent must exist; no overwrite.\n" +
                 "                        Avoids PowerShell text decoding/BOM; diagnostics remain on stderr.\n" +
                 "  --wait-seconds <value> Positive response deadline in seconds. Default: 120.\n" +
+                "  --follow-seconds <value> If the first response is an async acceptance with a completionFile, keep waiting up to this many seconds\n" +
+                "                        and return the terminal result in this one command (same output and exit codes as --wait-completion).\n" +
+                "                        A separate budget from --wait-seconds. Expiry is exit 3 (outcome unknown; do not resend). Other responses are unchanged.\n" +
                 "  -h, --help             Show this local command-line help without contacting Unity.\n"));
             return 0;
         }
@@ -187,6 +190,15 @@ internal static class Program
                 TryUpdateTrace(selectedPaths.TracePath, trace);
                 try
                 {
+                    if (selectedOptions.FollowSeconds is double followSeconds &&
+                        TryGetAsyncCompletionFile(response.Bytes!, out string completionFile))
+                    {
+                        trace.State = "following-completion";
+                        trace.UpdatedUtc = DateTimeOffset.UtcNow;
+                        TryUpdateTrace(selectedPaths.TracePath, trace);
+                        return RunCompletionWait(selectedOptions with { CompletionPath = completionFile, ExpectedId = requestId, WaitSeconds = followSeconds }, selectedOutput, followed: true);
+                    }
+
                     return ReturnResponse(response.Bytes!, selectedOptions.FailOnToolError, false, selectedOptions.TextMode, requestId, selectedPaths.ResponsePath, selectedPaths.ProjectRoot, selectedOutput);
                 }
                 catch (Exception exception) when (exception is IOException or ObjectDisposedException or UnauthorizedAccessException)
@@ -216,7 +228,7 @@ internal static class Program
         }
     }
 
-    private static int RunCompletionWait(CallOptions options, ResponseOutput output)
+    private static int RunCompletionWait(CallOptions options, ResponseOutput output, bool followed = false)
     {
         if (!TryResolveTransportPaths(out TransportPaths? paths, out string error))
             return EmitError(2, options.ExpectedId, "not-sent", null, "Could not locate project transport folders.", error);
@@ -235,7 +247,12 @@ internal static class Program
         string archivePath = Path.Combine(paths.OutboxPath, "archive", Path.GetFileName(path));
         ResponseWaitResult response = WaitForFirstResponse(path, options.ExpectedId!, options.WaitSeconds, archivePath);
         if (response.State == ResponseState.Timeout)
-            return EmitError(3, options.ExpectedId, "completion-unconfirmed", path, "Completion deadline expired; outcome unknown. No request was sent. Recheck the same path, do not resend the tool.", response.Detail);
+        {
+            string reason = followed
+                ? $"The request was accepted but its completion was not seen before --follow-seconds expired; outcome unknown. Do not resend the tool. Wait again with: ees-call --wait-completion \"{path}\" --id {options.ExpectedId}"
+                : "Completion deadline expired; outcome unknown. No request was sent. Recheck the same path, do not resend the tool.";
+            return EmitError(3, options.ExpectedId, "completion-unconfirmed", path, reason, response.Detail);
+        }
         if (response.State != ResponseState.Received)
             return EmitError(4, options.ExpectedId, "completion-unconfirmed", path, "Completion response was invalid or unreadable. No request was sent.", response.Detail);
         try
@@ -447,6 +464,27 @@ internal static class Program
         return false;
     }
 
+    private static bool TryGetAsyncCompletionFile(byte[] bytes, out string completionFile)
+    {
+        completionFile = string.Empty;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes, JsonValidationOptions);
+            if (!document.RootElement.TryGetProperty("result", out JsonElement result) || result.ValueKind != JsonValueKind.Object ||
+                !result.TryGetProperty("async", out JsonElement asyncFlag) || asyncFlag.ValueKind != JsonValueKind.True ||
+                !result.TryGetProperty("completionFile", out JsonElement file) || file.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(file.GetString()))
+                return false;
+
+            completionFile = file.GetString()!;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static void WriteNextCommandIfNeeded(byte[] bytes, string requestId, string projectRoot)
     {
         try
@@ -487,6 +525,7 @@ internal static class Program
         string? paramsFile = null;
         double waitSeconds = DefaultWaitSeconds;
         bool waitSpecified = false;
+        double? followSeconds = null;
         bool toolSpecified = false;
         bool paramsSpecified = false;
         bool codeFileSpecified = false;
@@ -611,6 +650,20 @@ internal static class Program
                 continue;
             }
 
+            if (string.Equals(key, "--follow-seconds", StringComparison.Ordinal))
+            {
+                if (followSeconds is not null || !TryReadOptionValue(args, ref index, inlineValue, out string? followText) ||
+                    !double.TryParse(followText, NumberStyles.Float, CultureInfo.InvariantCulture, out double followValue) ||
+                    !double.IsFinite(followValue) || followValue <= 0)
+                {
+                    error = "--follow-seconds must be a positive finite invariant-culture number and is allowed once.";
+                    return false;
+                }
+
+                followSeconds = followValue;
+                continue;
+            }
+
             error = $"Unknown argument '{argument}'. {UnknownArgumentHint(key)}";
             return false;
         }
@@ -618,7 +671,7 @@ internal static class Program
         if (statusOnly)
         {
             if (expectedId is null || completionPath is not null || toolSpecified || paramsSpecified || codeFileSpecified ||
-                outputFile is not null || failOnToolError || textMode || waitSpecified)
+                outputFile is not null || failOnToolError || textMode || waitSpecified || followSeconds is not null)
             {
                 error = "Use --status --id <request-id>; status mode is read-only and accepts no other options.";
                 return false;
@@ -626,9 +679,9 @@ internal static class Program
         }
         else if (completionPath is not null)
         {
-            if (toolSpecified || paramsSpecified || codeFileSpecified || textMode || expectedId is null)
+            if (toolSpecified || paramsSpecified || codeFileSpecified || textMode || followSeconds is not null || expectedId is null)
             {
-                error = "Completion mode requires --wait-completion and --id; it forbids --tool, --params-file, --code-file, and --text.";
+                error = "Completion mode requires --wait-completion and --id; it forbids --tool, --params-file, --code-file, --text, and --follow-seconds.";
                 return false;
             }
         }
@@ -638,7 +691,7 @@ internal static class Program
             return false;
         }
 
-        options = new CallOptions(tool ?? string.Empty, paramsFile, codeFile, waitSeconds, failOnToolError, textMode, statusOnly, completionPath, expectedId, outputFile);
+        options = new CallOptions(tool ?? string.Empty, paramsFile, codeFile, waitSeconds, failOnToolError, textMode, statusOnly, completionPath, expectedId, outputFile, followSeconds);
         return true;
     }
 
@@ -1312,7 +1365,7 @@ internal static class Program
         }
     }
 
-    private sealed record CallOptions(string Tool, string? ParamsFile, string? CodeFile, double WaitSeconds, bool FailOnToolError, bool TextMode, bool StatusOnly, string? CompletionPath, string? ExpectedId, string? OutputFile);
+    private sealed record CallOptions(string Tool, string? ParamsFile, string? CodeFile, double WaitSeconds, bool FailOnToolError, bool TextMode, bool StatusOnly, string? CompletionPath, string? ExpectedId, string? OutputFile, double? FollowSeconds = null);
 
     private sealed class ResponseOutput : IDisposable
     {
